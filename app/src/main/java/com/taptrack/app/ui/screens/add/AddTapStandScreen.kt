@@ -29,7 +29,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.taptrack.app.TapTrackApplication
 import com.taptrack.app.ui.components.CameraCapture
-import com.taptrack.app.ui.components.PinMapView
+import com.taptrack.app.ui.components.CenterPinMapView
 import com.taptrack.app.utils.formatCoordinates
 import com.taptrack.app.utils.locationFlow
 import java.io.File
@@ -89,6 +89,8 @@ fun AddTapStandScreen(
 
     if (showCamera) {
         CameraCapture(
+            lat = state.latitude,
+            lng = state.longitude,
             onImageCaptured = { path ->
                 vm.setPhoto(path)
                 showCamera = false
@@ -187,19 +189,26 @@ fun AddTapStandScreen(
                 }
             }
 
-            // Draggable pin map
+            // Center-pin map — move the map to position the pin
             if (state.latitude != null && state.longitude != null) {
-                Text(
-                    "Adjust Pin Location",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                PinMapView(
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Adjust Pin Location",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Move the map to position the pin on the exact spot",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                CenterPinMapView(
                     lat = state.latitude!!,
                     lng = state.longitude!!,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .height(260.dp)
                         .clip(RoundedCornerShape(12.dp)),
                     onLocationPicked = { lat, lng -> vm.setCoordinates(lat, lng) }
                 )

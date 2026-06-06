@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,8 +22,10 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.taptrack.app.TapTrackApplication
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.ui.components.MapSearchBar
 import com.taptrack.app.ui.components.OsmMapView
 import com.taptrack.app.utils.formatCoordinates
+import org.osmdroid.util.GeoPoint
 import java.io.File
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
@@ -51,30 +54,63 @@ fun MapScreen(
         }
     }
 
+    var locateTrigger by remember { mutableIntStateOf(0) }
+    var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Box(Modifier.fillMaxSize()) {
         OsmMapView(
             tapStands = tapStands,
+            locateTrigger = locateTrigger,
+            searchTarget = searchTarget,
             modifier = Modifier.fillMaxSize(),
             onMarkerClick = { item -> vm.select(item) }
         )
 
-        if (!locationPermissions.allPermissionsGranted) {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(16.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text(
-                    text = "Location permission required for GPS tagging",
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
+        // Search bar + optional permission banner stacked at the top
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MapSearchBar(
+                onResultSelected = { point, _ -> searchTarget = point },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            if (!locationPermissions.allPermissionsGranted) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Location permission required for GPS tagging",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
             }
+        }
+
+        // Locate-me FAB
+        FloatingActionButton(
+            onClick = { locateTrigger++ },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        ) {
+            Icon(
+                imageVector = Icons.Default.MyLocation,
+                contentDescription = "Go to my location"
+            )
         }
     }
 
