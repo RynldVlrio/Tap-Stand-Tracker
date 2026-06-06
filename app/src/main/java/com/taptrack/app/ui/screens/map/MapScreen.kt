@@ -56,6 +56,13 @@ fun MapScreen(
 
     var locateTrigger by remember { mutableIntStateOf(0) }
     var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
+
+    // Auto-center on the device's real location once permissions are available
+    LaunchedEffect(locationPermissions.allPermissionsGranted) {
+        if (locationPermissions.allPermissionsGranted) {
+            locateTrigger++
+        }
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Box(Modifier.fillMaxSize()) {

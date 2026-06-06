@@ -105,13 +105,22 @@ fun OsmMapView(
         }
     }
 
-    // Animate to user's location when the FAB triggers it
+    // Animate to user's location when the FAB triggers it (or on auto-center at startup)
     LaunchedEffect(locateTrigger) {
         if (locateTrigger > 0) {
             val location = myLocationOverlay.myLocation
                 ?: context.getLastKnownLocation()
                     ?.let { GeoPoint(it.latitude, it.longitude) }
-            location?.let { mapView.controller.animateTo(it) }
+            if (location != null) {
+                mapView.controller.animateTo(location)
+            } else {
+                // No cached location yet — center as soon as GPS gets its first fix
+                myLocationOverlay.runOnFirstFix {
+                    myLocationOverlay.myLocation?.let { point ->
+                        mapView.post { mapView.controller.animateTo(point) }
+                    }
+                }
+            }
         }
     }
 
