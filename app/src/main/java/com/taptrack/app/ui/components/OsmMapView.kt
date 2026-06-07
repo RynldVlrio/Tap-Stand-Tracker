@@ -22,6 +22,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.utils.createLocationDotBitmap
 import com.taptrack.app.utils.createTapMarkerBitmap
 import com.taptrack.app.utils.getLastKnownLocation
 import org.osmdroid.config.Configuration
@@ -72,6 +73,9 @@ fun OsmMapView(
     val myLocationOverlay = remember {
         MyLocationNewOverlay(GpsMyLocationProvider(context), mapView).apply {
             enableMyLocation()
+            val dot = createLocationDotBitmap(context)
+            setPersonIcon(dot)
+            setPersonAnchor(.5f, .5f)
             mapView.overlays.add(0, this)
         }
     }
