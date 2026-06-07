@@ -8,7 +8,7 @@ import java.net.URL
 import java.util.concurrent.TimeUnit
 
 private const val SHEET_ID = "1XLpVZehtAlPqtMb69El2qtmXJcC45l2nT0b2_aHqZ5Y"
-private const val SHEET_NAME = "AppControl"
+private const val SHEET_GID = "0" // AppControl tab gid from the sheet URL
 private const val PREFS_KEY_FIRST_UPDATE_SEEN = "first_update_seen_ms"
 
 data class AppControlConfig(
@@ -29,7 +29,7 @@ sealed class AppUpdateState {
 
 suspend fun fetchAppControl(): AppControlConfig? = withContext(Dispatchers.IO) {
     try {
-        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/gviz/tq?tqx=out:csv&sheet=$SHEET_NAME"
+        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/export?format=csv&gid=$SHEET_GID"
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.apply {
             requestMethod = "GET"
