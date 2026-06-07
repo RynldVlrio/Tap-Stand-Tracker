@@ -50,6 +50,7 @@ fun MapSearchBar(
     val focusRequester = remember { FocusRequester() }
 
     var expanded by remember { mutableStateOf(false) }
+    var justExpanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
@@ -71,11 +72,14 @@ fun MapSearchBar(
         isSearching = false
     }
 
-    // Auto-focus text field when bar expands
+    // Auto-focus text field when bar expands; guard prevents immediate collapse on focus event
     LaunchedEffect(expanded) {
         if (expanded) {
+            justExpanded = true
             delay(80)
             focusRequester.requestFocus()
+            delay(350)
+            justExpanded = false
         }
     }
 
@@ -117,7 +121,7 @@ fun MapSearchBar(
                                 .fillMaxWidth()
                                 .focusRequester(focusRequester)
                                 .onFocusChanged { state ->
-                                    if (!state.isFocused) {
+                                    if (!state.isFocused && !justExpanded) {
                                         scope.launch {
                                             delay(150)
                                             showDropdown = false

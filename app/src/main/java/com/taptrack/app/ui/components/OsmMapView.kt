@@ -1,20 +1,20 @@
 package com.taptrack.app.ui.components
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -223,29 +223,53 @@ fun CenterPinMapView(
         }
     }
 
+    val pinColor = MaterialTheme.colorScheme.primary
+
     Box(modifier = modifier) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-        // Fixed pin overlay — tip of the icon aligns with exact map center
+        // Fixed pin overlay — tip lands exactly at map center
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            // Drop shadow at the tip point (stays at center, no offset)
+            // Drop shadow ellipse at the tip
             Box(
                 modifier = Modifier
-                    .size(width = 14.dp, height = 5.dp)
+                    .size(width = 18.dp, height = 6.dp)
                     .background(Color.Black.copy(alpha = 0.22f), RoundedCornerShape(50))
             )
-            // Pin icon — shifted up so its tip lands exactly at center
-            Icon(
-                imageVector = Icons.Default.LocationOn,
-                contentDescription = "Pin location",
+            // Modern teardrop pin — Canvas so tip lands at center
+            Canvas(
                 modifier = Modifier
-                    .size(44.dp)
-                    .offset(y = (-22).dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+                    .size(52.dp)
+                    .offset(y = (-26).dp)
+            ) {
+                val w = size.width
+                val h = size.height
+                val cx = w / 2f
+                val radius = w * 0.38f
+                val cy = radius + 3f
+
+                // Soft shadow under the balloon
+                drawCircle(
+                    color = Color.Black.copy(alpha = 0.18f),
+                    radius = radius + 2f,
+                    center = Offset(cx + 2f, cy + 4f)
+                )
+                // Balloon circle
+                drawCircle(pinColor, radius = radius, center = Offset(cx, cy))
+                // White inner dot
+                drawCircle(Color.White, radius = radius * 0.4f, center = Offset(cx, cy))
+                // Teardrop pointer
+                val path = Path().apply {
+                    moveTo(cx - radius * 0.5f, cy + radius * 0.65f)
+                    lineTo(cx + radius * 0.5f, cy + radius * 0.65f)
+                    lineTo(cx, h - 2f)
+                    close()
+                }
+                drawPath(path, pinColor)
+            }
         }
     }
 }

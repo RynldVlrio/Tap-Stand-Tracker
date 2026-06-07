@@ -4,8 +4,8 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
@@ -14,11 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -125,98 +123,92 @@ fun BarcodeScanner(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth(0.92f),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            // ── Full-screen camera preview ───────────────────────────────
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier.fillMaxSize()
+            )
 
-                // ── Header ───────────────────────────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Scan Meter Code",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    // Torch toggle
-                    IconButton(onClick = { torchOn = !torchOn }) {
-                        Icon(
-                            imageVector = if (torchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                            contentDescription = if (torchOn) "Torch on" else "Torch off",
-                            tint = if (torchOn) Color(0xFFFFD740)
-                                   else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close scanner")
-                    }
-                }
+            // ── Vignette + corner bracket overlay ───────────────────────
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val hPad = size.width * 0.10f
+                val fw = size.width - 2 * hPad
+                val fh = fw * 0.65f
+                val vPad = (size.height - fh) / 2f
+                val fl = hPad
+                val ft = vPad
+                val fr = size.width - hPad
+                val fb = vPad + fh
+                val corner = 32.dp.toPx()
+                val sw = 3.5.dp.toPx()
 
-                // ── Camera preview with viewfinder overlay ───────────────
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(260.dp)
-                        .clip(RectangleShape)
-                ) {
-                    AndroidView(
-                        factory = { previewView },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                val dim = Color.Black.copy(alpha = 0.60f)
+                drawRect(dim, size = Size(size.width, ft))
+                drawRect(dim, topLeft = Offset(0f, fb), size = Size(size.width, size.height - fb))
+                drawRect(dim, topLeft = Offset(0f, ft), size = Size(fl, fh))
+                drawRect(dim, topLeft = Offset(fr, ft), size = Size(size.width - fr, fh))
 
-                    // Darkened surround + white corner brackets
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val hPad = size.width * 0.10f
-                        val vPad = size.height * 0.10f
-                        val fl = hPad
-                        val ft = vPad
-                        val fr = size.width - hPad
-                        val fb = size.height - vPad
-                        val fh = fb - ft
-                        val fw = fr - fl
-                        val corner = 28.dp.toPx()
-                        val sw = 3.5.dp.toPx()
-
-                        // Vignette
-                        val dim = Color.Black.copy(alpha = 0.55f)
-                        drawRect(dim, size = Size(size.width, ft))
-                        drawRect(dim, topLeft = Offset(0f, fb), size = Size(size.width, size.height - fb))
-                        drawRect(dim, topLeft = Offset(0f, ft), size = Size(fl, fh))
-                        drawRect(dim, topLeft = Offset(fr, ft), size = Size(size.width - fr, fh))
-
-                        val w = Color.White
-                        val cap = StrokeCap.Round
-                        // top-left
-                        drawLine(w, Offset(fl, ft + corner), Offset(fl, ft), sw, cap)
-                        drawLine(w, Offset(fl, ft), Offset(fl + corner, ft), sw, cap)
-                        // top-right
-                        drawLine(w, Offset(fr - corner, ft), Offset(fr, ft), sw, cap)
-                        drawLine(w, Offset(fr, ft), Offset(fr, ft + corner), sw, cap)
-                        // bottom-left
-                        drawLine(w, Offset(fl, fb - corner), Offset(fl, fb), sw, cap)
-                        drawLine(w, Offset(fl, fb), Offset(fl + corner, fb), sw, cap)
-                        // bottom-right
-                        drawLine(w, Offset(fr - corner, fb), Offset(fr, fb), sw, cap)
-                        drawLine(w, Offset(fr, fb), Offset(fr, fb - corner), sw, cap)
-                    }
-                }
-
-                // ── Instruction ──────────────────────────────────────────
-                Text(
-                    text = "Point at the meter's QR code or barcode",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
-                )
+                val w = Color.White
+                val cap = StrokeCap.Round
+                drawLine(w, Offset(fl, ft + corner), Offset(fl, ft), sw, cap)
+                drawLine(w, Offset(fl, ft), Offset(fl + corner, ft), sw, cap)
+                drawLine(w, Offset(fr - corner, ft), Offset(fr, ft), sw, cap)
+                drawLine(w, Offset(fr, ft), Offset(fr, ft + corner), sw, cap)
+                drawLine(w, Offset(fl, fb - corner), Offset(fl, fb), sw, cap)
+                drawLine(w, Offset(fl, fb), Offset(fl + corner, fb), sw, cap)
+                drawLine(w, Offset(fr - corner, fb), Offset(fr, fb), sw, cap)
+                drawLine(w, Offset(fr, fb), Offset(fr, fb - corner), sw, cap)
             }
+
+            // ── Top header ──────────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 4.dp, end = 4.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close scanner",
+                        tint = Color.White
+                    )
+                }
+                Text(
+                    text = "Scan Meter Code",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { torchOn = !torchOn }) {
+                    Icon(
+                        imageVector = if (torchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                        contentDescription = if (torchOn) "Torch on" else "Torch off",
+                        tint = if (torchOn) Color(0xFFFFD740) else Color.White
+                    )
+                }
+            }
+
+            // ── Bottom instruction ───────────────────────────────────────
+            Text(
+                text = "Point at the meter's QR code or barcode",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.85f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 48.dp, start = 24.dp, end = 24.dp)
+            )
         }
     }
 }
