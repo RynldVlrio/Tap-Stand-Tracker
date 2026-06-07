@@ -1,9 +1,9 @@
 package com.taptrack.app.ui.screens.map
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.*
@@ -22,10 +22,12 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.taptrack.app.TapTrackApplication
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.ui.components.MapDownloadDialog
 import com.taptrack.app.ui.components.MapSearchBar
 import com.taptrack.app.ui.components.OsmMapView
 import com.taptrack.app.utils.formatCoordinates
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
 import java.io.File
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
@@ -56,8 +58,9 @@ fun MapScreen(
 
     var locateTrigger by remember { mutableIntStateOf(0) }
     var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
+    var mapViewRef by remember { mutableStateOf<MapView?>(null) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
 
-    // Auto-center on the device's real location once permissions are available
     LaunchedEffect(locationPermissions.allPermissionsGranted) {
         if (locationPermissions.allPermissionsGranted) {
             locateTrigger++
@@ -71,10 +74,11 @@ fun MapScreen(
             locateTrigger = locateTrigger,
             searchTarget = searchTarget,
             modifier = Modifier.fillMaxSize(),
-            onMarkerClick = { item -> vm.select(item) }
+            onMarkerClick = { item -> vm.select(item) },
+            onMapViewReady = { mapViewRef = it }
         )
 
-        // Search bar + optional permission banner stacked at the top
+        // Search bar (collapsed by default — shows only icon)
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -105,19 +109,37 @@ fun MapScreen(
             }
         }
 
-        // Locate-me FAB
-        FloatingActionButton(
-            onClick = { locateTrigger++ },
+        // FABs stacked at bottom-end
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.End
         ) {
-            Icon(
-                imageVector = Icons.Default.MyLocation,
-                contentDescription = "Go to my location"
-            )
+            // Download offline map
+            SmallFloatingActionButton(
+                onClick = { showDownloadDialog = true },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = "Download map area for offline use"
+                )
+            }
+
+            // Locate me
+            FloatingActionButton(
+                onClick = { locateTrigger++ },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MyLocation,
+                    contentDescription = "Go to my location"
+                )
+            }
         }
     }
 
@@ -132,6 +154,16 @@ fun MapScreen(
                     vm.select(null)
                     onNavigateToDetail(selected!!.tapStand.id)
                 }
+            )
+        }
+    }
+
+    if (showDownloadDialog) {
+        val mv = mapViewRef
+        if (mv != null) {
+            MapDownloadDialog(
+                mapView = mv,
+                onDismiss = { showDownloadDialog = false }
             )
         }
     }

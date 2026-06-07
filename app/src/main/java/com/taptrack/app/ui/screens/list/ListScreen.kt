@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -22,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.taptrack.app.TapTrackApplication
+import com.taptrack.app.data.local.entity.ProjectEntity
 import com.taptrack.app.data.model.TapStandWithMeters
 import com.taptrack.app.ui.screens.map.StatusChip
 import java.io.File
@@ -39,6 +42,8 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
     val tapStands by vm.tapStands.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val statusFilter by vm.statusFilter.collectAsStateWithLifecycle()
+    val folderFilter by vm.folderFilter.collectAsStateWithLifecycle()
+    val folders by vm.folders.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -53,6 +58,45 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
             shape = RoundedCornerShape(50)
         )
 
+        // Folder filter row — only shown when folders exist
+        if (folders.isNotEmpty()) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 4.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = folderFilter == null,
+                        onClick = { vm.setFolderFilter(null) },
+                        label = { Text("All Folders") },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                }
+                items(folders) { folder ->
+                    FilterChip(
+                        selected = folderFilter == folder.id,
+                        onClick = { vm.setFolderFilter(folder.id) },
+                        label = { Text(folder.name) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                }
+            }
+        }
+
+        // Status filter row
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -78,6 +122,7 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
                 items(tapStands, key = { it.tapStand.id }) { item ->
                     TapStandListItem(
                         item = item,
+                        folders = folders,
                         onClick = { onNavigateToDetail(item.tapStand.id) }
                     )
                 }
@@ -87,7 +132,13 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
 }
 
 @Composable
-private fun TapStandListItem(item: TapStandWithMeters, onClick: () -> Unit) {
+private fun TapStandListItem(
+    item: TapStandWithMeters,
+    folders: List<ProjectEntity>,
+    onClick: () -> Unit
+) {
+    val folder = folders.find { it.id == item.tapStand.folderId }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -153,6 +204,19 @@ private fun TapStandListItem(item: TapStandWithMeters, onClick: () -> Unit) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (folder != null) {
+                        Icon(
+                            Icons.Default.Folder,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = folder.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }

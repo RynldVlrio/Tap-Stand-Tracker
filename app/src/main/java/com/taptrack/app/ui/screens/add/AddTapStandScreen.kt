@@ -28,6 +28,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.taptrack.app.TapTrackApplication
+import com.taptrack.app.ui.components.BarcodeScanner
 import com.taptrack.app.ui.components.CameraCapture
 import com.taptrack.app.ui.components.CenterPinMapView
 import com.taptrack.app.utils.formatCoordinates
@@ -55,10 +56,15 @@ fun AddTapStandScreen(
     )
 
     val state by vm.state.collectAsStateWithLifecycle()
+    val folders by vm.folders.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showCamera by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var statusMenuExpanded by remember { mutableStateOf(false) }
+    var folderMenuExpanded by remember { mutableStateOf(false) }
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    // Index of the meter whose serial number is being scanned; null = scanner closed
+    var scannerMeterIndex by remember { mutableStateOf<Int?>(null) }
 
     val locationPerm = rememberPermissionState(Manifest.permission.ACCESS_FINE_LOCATION)
     val cameraPerm = rememberPermissionState(Manifest.permission.CAMERA)
@@ -327,6 +333,59 @@ fun AddTapStandScreen(
                 }
             }
 
+            // Project Folder picker
+            val selectedFolder = folders.find { it.id == state.folderId }
+            ExposedDropdownMenuBox(
+                expanded = folderMenuExpanded,
+                onExpandedChange = { folderMenuExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = selectedFolder?.name ?: "No folder",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Project Folder") },
+                    leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(folderMenuExpanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor()
+                )
+                ExposedDropdownMenu(
+                    expanded = folderMenuExpanded,
+                    onDismissRequest = { folderMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("No folder") },
+                        leadingIcon = { Icon(Icons.Default.FolderOff, null, modifier = Modifier.size(20.dp)) },
+                        onClick = { vm.setFolder(null); folderMenuExpanded = false }
+                    )
+                    folders.forEach { folder ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(folder.name, style = MaterialTheme.typography.bodyMedium)
+                                    if (folder.description.isNotEmpty()) {
+                                        Text(
+                                            folder.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            },
+                            leadingIcon = { Icon(Icons.Default.Folder, null, modifier = Modifier.size(20.dp)) },
+                            onClick = { vm.setFolder(folder.id); folderMenuExpanded = false }
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Create new folder…") },
+                        leadingIcon = { Icon(Icons.Default.CreateNewFolder, null, modifier = Modifier.size(20.dp)) },
+                        onClick = { folderMenuExpanded = false; showCreateFolderDialog = true }
+                    )
+                }
+            }
+
             // Water Meters section
             HorizontalDivider()
             Row(
@@ -360,7 +419,8 @@ fun AddTapStandScreen(
                     index = index,
                     form = meter,
                     onUpdate = { vm.updateMeter(index, it) },
-                    onRemove = { vm.removeMeter(index) }
+                    onRemove = { vm.removeMeter(index) },
+                    onScanRequest = { scannerMeterIndex = index }
                 )
             }
         }
@@ -388,6 +448,70 @@ fun AddTapStandScreen(
             DatePicker(state = datePickerState)
         }
     }
+
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onConfirm = { name, description ->
+                vm.createFolder(name, description)
+                showCreateFolderDialog = false
+            },
+            onDismiss = { showCreateFolderDialog = false }
+        )
+    }
+
+    val activeScannerIndex = scannerMeterIndex
+    if (activeScannerIndex != null) {
+        BarcodeScanner(
+            onBarcodeDetected = { value ->
+                val meter = state.meters.getOrNull(activeScannerIndex)
+                if (meter != null) vm.updateMeter(activeScannerIndex, meter.copy(serialNumber = value))
+                scannerMeterIndex = null
+            },
+            onDismiss = { scannerMeterIndex = null }
+        )
+    }
+}
+
+@Composable
+private fun CreateFolderDialog(
+    onConfirm: (name: String, description: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+        title = { Text("New Project Folder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Folder Name *") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name, description) },
+                enabled = name.isNotBlank()
+            ) { Text("Create") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -395,7 +519,8 @@ private fun MeterFormItem(
     index: Int,
     form: MeterForm,
     onUpdate: (MeterForm) -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onScanRequest: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -429,13 +554,35 @@ private fun MeterFormItem(
                     )
                 }
             }
-            OutlinedTextField(
-                value = form.serialNumber,
-                onValueChange = { onUpdate(form.copy(serialNumber = it)) },
-                label = { Text("Serial Number") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = form.serialNumber,
+                    onValueChange = { onUpdate(form.copy(serialNumber = it)) },
+                    label = { Text("Serial Number") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    trailingIcon = {
+                        if (form.serialNumber.isNotEmpty()) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                )
+                FilledTonalIconButton(onClick = onScanRequest) {
+                    Icon(
+                        Icons.Default.QrCodeScanner,
+                        contentDescription = "Scan meter barcode or QR code",
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
             OutlinedTextField(
                 value = form.consumerName,
                 onValueChange = { onUpdate(form.copy(consumerName = it)) },

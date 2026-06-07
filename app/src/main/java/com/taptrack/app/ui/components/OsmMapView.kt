@@ -48,7 +48,8 @@ fun OsmMapView(
     initialLng: Double = 120.9842,
     zoom: Double = 15.0,
     showUserLocation: Boolean = true,
-    onMarkerClick: (TapStandWithMeters) -> Unit = {}
+    onMarkerClick: (TapStandWithMeters) -> Unit = {},
+    onMapViewReady: (MapView) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -65,6 +66,8 @@ fun OsmMapView(
             controller.setCenter(GeoPoint(initialLat, initialLng))
         }
     }
+
+    LaunchedEffect(mapView) { onMapViewReady(mapView) }
 
     val myLocationOverlay = remember {
         MyLocationNewOverlay(GpsMyLocationProvider(context), mapView).apply {

@@ -13,5 +13,6 @@ data class TapStandEntity(
     val photoPath: String,
     val installationDate: String,
     val status: String,
+    val folderId: Long? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

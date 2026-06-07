@@ -7,6 +7,6 @@ import com.taptrack.app.data.repository.TapStandRepository
 class TapTrackApplication : Application() {
     val database by lazy { AppDatabase.getInstance(this) }
     val repository by lazy {
-        TapStandRepository(database.tapStandDao(), database.waterMeterDao())
+        TapStandRepository(database.tapStandDao(), database.waterMeterDao(), database.projectDao())
     }
 }

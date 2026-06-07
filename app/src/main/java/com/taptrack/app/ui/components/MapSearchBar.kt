@@ -1,9 +1,14 @@
 package com.taptrack.app.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,6 +21,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,7 +47,9 @@ fun MapSearchBar(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
+    val focusRequester = remember { FocusRequester() }
 
+    var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<SearchResult>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
@@ -50,7 +59,6 @@ fun MapSearchBar(
     val hasDropdownContent = results.isNotEmpty() || coordTarget != null
     val dropdownVisible = showDropdown && hasDropdownContent
 
-    // Debounced Nominatim search — skip if query looks like coordinates
     LaunchedEffect(query) {
         results = emptyList()
         if (query.length < 2 || coordTarget != null) {
@@ -63,117 +71,162 @@ fun MapSearchBar(
         isSearching = false
     }
 
-    fun selectResult(point: GeoPoint, label: String) {
-        onResultSelected(point, label)
+    // Auto-focus text field when bar expands
+    LaunchedEffect(expanded) {
+        if (expanded) {
+            delay(80)
+            focusRequester.requestFocus()
+        }
+    }
+
+    fun collapse() {
         query = ""
         results = emptyList()
         showDropdown = false
         focusManager.clearFocus()
+        expanded = false
     }
 
-    Column(modifier = modifier) {
-        // ── Search input ──────────────────────────────────────────────
-        Surface(
-            shape = if (dropdownVisible)
-                RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
-            else
-                RoundedCornerShape(14.dp),
-            shadowElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            TextField(
-                value = query,
-                onValueChange = { query = it; showDropdown = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { state ->
-                        if (!state.isFocused) {
-                            // Small delay so a result tap registers before we hide
-                            scope.launch {
-                                delay(150)
-                                showDropdown = false
-                            }
-                        }
-                    },
-                placeholder = {
-                    Text(
-                        text = "Search place, landmark, or coordinates…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                leadingIcon = {
-                    if (isSearching)
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    else
-                        Icon(Icons.Default.Search, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = {
-                            query = ""
-                            results = emptyList()
-                            showDropdown = false
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search")
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent
-                )
-            )
-        }
+    fun selectResult(point: GeoPoint, label: String) {
+        onResultSelected(point, label)
+        collapse()
+    }
 
-        // ── Results dropdown ──────────────────────────────────────────
-        if (dropdownVisible) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp),
-                shadowElevation = 6.dp,
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    // Coordinate shortcut at the top
-                    coordTarget?.let { point ->
-                        item {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            SearchResultRow(
-                                icon = Icons.Default.GpsFixed,
-                                title = "Go to coordinates",
-                                subtitle = "%.6f, %.6f".format(point.latitude, point.longitude),
-                                onClick = {
-                                    selectResult(
-                                        point,
-                                        "%.6f, %.6f".format(point.latitude, point.longitude)
+    // Outer box always fills the parent width so layout is stable
+    Box(modifier = modifier) {
+        AnimatedContent(
+            targetState = expanded,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "search_bar"
+        ) { isExpanded ->
+            if (isExpanded) {
+                // ── Expanded: full search bar ─────────────────────────────
+                Column {
+                    Surface(
+                        shape = if (dropdownVisible)
+                            RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp)
+                        else
+                            RoundedCornerShape(14.dp),
+                        shadowElevation = 6.dp,
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        TextField(
+                            value = query,
+                            onValueChange = { query = it; showDropdown = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                                .onFocusChanged { state ->
+                                    if (!state.isFocused) {
+                                        scope.launch {
+                                            delay(150)
+                                            showDropdown = false
+                                            if (query.isEmpty()) {
+                                                delay(100)
+                                                expanded = false
+                                            }
+                                        }
+                                    }
+                                },
+                            placeholder = {
+                                Text(
+                                    "Search place, landmark, or coordinates…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            leadingIcon = {
+                                if (isSearching)
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                else
+                                    Icon(Icons.Default.Search, contentDescription = null)
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { collapse() }) {
+                                    Icon(
+                                        if (query.isNotEmpty()) Icons.Default.Close else Icons.Default.Close,
+                                        contentDescription = "Close search"
                                     )
                                 }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                            colors = TextFieldDefaults.colors(
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent
                             )
-                        }
+                        )
                     }
 
-                    // Geocoded place results
-                    items(results) { result ->
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        SearchResultRow(
-                            icon = Icons.Default.Place,
-                            title = result.title,
-                            subtitle = result.subtitle,
-                            onClick = {
-                                selectResult(GeoPoint(result.lat, result.lon), result.title)
+                    // ── Results dropdown ──────────────────────────────────
+                    if (dropdownVisible) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp),
+                            shadowElevation = 6.dp,
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                                coordTarget?.let { point ->
+                                    item {
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                        SearchResultRow(
+                                            icon = Icons.Default.GpsFixed,
+                                            title = "Go to coordinates",
+                                            subtitle = "%.6f, %.6f".format(point.latitude, point.longitude),
+                                            onClick = {
+                                                selectResult(
+                                                    point,
+                                                    "%.6f, %.6f".format(point.latitude, point.longitude)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                                items(results) { result ->
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                    SearchResultRow(
+                                        icon = Icons.Default.Place,
+                                        title = result.title,
+                                        subtitle = result.subtitle,
+                                        onClick = {
+                                            selectResult(GeoPoint(result.lat, result.lon), result.title)
+                                        }
+                                    )
+                                }
                             }
-                        )
+                        }
+                    }
+                }
+            } else {
+                // ── Collapsed: transparent search icon pill ───────────────
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.28f),
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.size(46.dp),
+                        onClick = { expanded = true }
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Open search",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
             }

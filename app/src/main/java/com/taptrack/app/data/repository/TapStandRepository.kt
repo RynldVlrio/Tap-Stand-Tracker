@@ -1,7 +1,9 @@
 package com.taptrack.app.data.repository
 
+import com.taptrack.app.data.local.dao.ProjectDao
 import com.taptrack.app.data.local.dao.TapStandDao
 import com.taptrack.app.data.local.dao.WaterMeterDao
+import com.taptrack.app.data.local.entity.ProjectEntity
 import com.taptrack.app.data.local.entity.TapStandEntity
 import com.taptrack.app.data.local.entity.WaterMeterEntity
 import com.taptrack.app.data.model.TapStandWithMeters
@@ -9,7 +11,8 @@ import kotlinx.coroutines.flow.Flow
 
 class TapStandRepository(
     private val tapStandDao: TapStandDao,
-    private val waterMeterDao: WaterMeterDao
+    private val waterMeterDao: WaterMeterDao,
+    private val projectDao: ProjectDao
 ) {
     fun getAllWithMeters(): Flow<List<TapStandWithMeters>> = tapStandDao.getAllWithMeters()
 
@@ -37,4 +40,15 @@ class TapStandRepository(
     }
 
     suspend fun delete(id: Long) = tapStandDao.deleteById(id)
+
+    // ── Project / Folder operations ──────────────────────────────────────────
+
+    fun getAllProjects(): Flow<List<ProjectEntity>> = projectDao.getAll()
+
+    suspend fun saveProject(name: String, description: String): Long =
+        projectDao.insert(ProjectEntity(name = name, description = description))
+
+    suspend fun deleteProject(id: Long) = projectDao.deleteById(id)
+
+    suspend fun getProjectById(id: Long): ProjectEntity? = projectDao.getById(id)
 }

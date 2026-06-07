@@ -3,6 +3,7 @@ package com.taptrack.app.ui.screens.add
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.taptrack.app.data.local.entity.ProjectEntity
 import com.taptrack.app.data.local.entity.TapStandEntity
 import com.taptrack.app.data.local.entity.WaterMeterEntity
 import com.taptrack.app.data.repository.TapStandRepository
@@ -25,6 +26,7 @@ data class FormState(
     val photoPath: String = "",
     val installationDate: String = "",
     val status: String = "Active",
+    val folderId: Long? = null,
     val meters: List<MeterForm> = emptyList(),
     val isLoading: Boolean = false,
     val isSaved: Boolean = false,
@@ -39,6 +41,9 @@ class AddTapStandViewModel(
     private val _state = MutableStateFlow(FormState())
     val state: StateFlow<FormState> = _state.asStateFlow()
 
+    val folders: StateFlow<List<ProjectEntity>> = repository.getAllProjects()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     init {
         if (editId != null) {
             viewModelScope.launch {
@@ -52,6 +57,7 @@ class AddTapStandViewModel(
                             photoPath = item.tapStand.photoPath,
                             installationDate = item.tapStand.installationDate,
                             status = item.tapStand.status,
+                            folderId = item.tapStand.folderId,
                             meters = item.meters.map { m ->
                                 MeterForm(
                                     id = m.id,
@@ -74,6 +80,14 @@ class AddTapStandViewModel(
     fun setPhoto(path: String) = _state.update { it.copy(photoPath = path) }
     fun setInstallationDate(v: String) = _state.update { it.copy(installationDate = v) }
     fun setStatus(v: String) = _state.update { it.copy(status = v) }
+    fun setFolder(id: Long?) = _state.update { it.copy(folderId = id) }
+
+    fun createFolder(name: String, description: String) {
+        viewModelScope.launch {
+            val newId = repository.saveProject(name.trim(), description.trim())
+            _state.update { it.copy(folderId = newId) }
+        }
+    }
 
     fun addMeter() = _state.update { it.copy(meters = it.meters + MeterForm()) }
 
@@ -106,7 +120,8 @@ class AddTapStandViewModel(
                     longitude = s.longitude,
                     photoPath = s.photoPath,
                     installationDate = s.installationDate,
-                    status = s.status
+                    status = s.status,
+                    folderId = s.folderId
                 )
                 val meters = s.meters.map {
                     WaterMeterEntity(
