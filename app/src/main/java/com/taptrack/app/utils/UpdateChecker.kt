@@ -1,5 +1,6 @@
 package com.taptrack.app.utils
 
+import com.taptrack.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -16,6 +17,9 @@ suspend fun checkForUpdate(currentVersion: String): UpdateInfo? = withContext(Di
         connection.apply {
             requestMethod = "GET"
             setRequestProperty("Accept", "application/vnd.github.v3+json")
+            if (BuildConfig.GITHUB_TOKEN.isNotEmpty()) {
+                setRequestProperty("Authorization", "Bearer ${BuildConfig.GITHUB_TOKEN}")
+            }
             connectTimeout = 5000
             readTimeout = 5000
         }
