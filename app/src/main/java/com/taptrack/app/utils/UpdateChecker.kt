@@ -1,48 +1,104 @@
 package com.taptrack.app.utils
 
-import com.taptrack.app.BuildConfig
+import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
-data class UpdateInfo(val latestVersion: String, val releaseUrl: String)
+private const val SHEET_ID = "1XLpVZehtAlPqtMb69El2qtmXJcC45l2nT0b2_aHqZ5Y"
+private const val SHEET_NAME = "AppControl"
+private const val PREFS_KEY_FIRST_UPDATE_SEEN = "first_update_seen_ms"
 
-suspend fun checkForUpdate(currentVersion: String): UpdateInfo? = withContext(Dispatchers.IO) {
+data class AppControlConfig(
+    val status: String,
+    val message: String,
+    val latestVersionCode: Int,
+    val minSupportedVersionCode: Int,
+    val apkUrl: String,
+    val graceDays: Int
+)
+
+sealed class AppUpdateState {
+    object Normal : AppUpdateState()
+    data class UpdateAvailable(val apkUrl: String, val latestVersionCode: Int) : AppUpdateState()
+    data class ForceUpdate(val apkUrl: String, val latestVersionCode: Int) : AppUpdateState()
+    data class Maintenance(val message: String) : AppUpdateState()
+}
+
+suspend fun fetchAppControl(): AppControlConfig? = withContext(Dispatchers.IO) {
     try {
-        val connection = URL(
-            "https://api.github.com/repos/RynldVlrio/Tap-Stand-Tracker/releases/latest"
-        ).openConnection() as HttpURLConnection
+        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/gviz/tq?tqx=out:csv&sheet=$SHEET_NAME"
+        val connection = URL(url).openConnection() as HttpURLConnection
         connection.apply {
             requestMethod = "GET"
-            setRequestProperty("Accept", "application/vnd.github.v3+json")
-            if (BuildConfig.GITHUB_TOKEN.isNotEmpty()) {
-                setRequestProperty("Authorization", "Bearer ${BuildConfig.GITHUB_TOKEN}")
-            }
-            connectTimeout = 5000
-            readTimeout = 5000
+            connectTimeout = 6000
+            readTimeout = 6000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "TapTrack-Android/1.0")
         }
         if (connection.responseCode != 200) return@withContext null
-        val json = JSONObject(connection.inputStream.bufferedReader().readText())
-        val tagName = json.getString("tag_name").removePrefix("v")
-        val releaseUrl = json.getString("html_url")
-        if (isNewer(remote = tagName, current = currentVersion)) UpdateInfo(tagName, releaseUrl)
-        else null
+        parseCsv(connection.inputStream.bufferedReader().readText())
     } catch (_: Exception) {
         null
     }
 }
 
-private fun isNewer(remote: String, current: String): Boolean {
-    val r = remote.split(".").map { it.toIntOrNull() ?: 0 }
-    val c = current.split(".").map { it.toIntOrNull() ?: 0 }
-    val len = maxOf(r.size, c.size)
-    for (i in 0 until len) {
-        val rv = r.getOrElse(i) { 0 }
-        val cv = c.getOrElse(i) { 0 }
-        if (rv > cv) return true
-        if (rv < cv) return false
+private fun parseCsv(csv: String): AppControlConfig? {
+    val map = mutableMapOf<String, String>()
+    val lines = csv.lines().drop(1) // skip header row
+    for (line in lines) {
+        if (line.isBlank()) continue
+        // Split on first comma only so URLs/messages with commas are preserved
+        val commaIndex = line.indexOf(',')
+        if (commaIndex < 0) continue
+        val key = line.substring(0, commaIndex).trim().removeSurrounding("\"")
+        val value = line.substring(commaIndex + 1).trim().removeSurrounding("\"")
+        map[key] = value
     }
-    return false
+    return try {
+        AppControlConfig(
+            status = map["status"]?.trim() ?: "ACTIVE",
+            message = map["message"]?.trim() ?: "",
+            latestVersionCode = map["latestVersionCode"]?.trim()?.toIntOrNull() ?: 0,
+            minSupportedVersionCode = map["minSupportedVersionCode"]?.trim()?.toIntOrNull() ?: 0,
+            apkUrl = map["apkUrl"]?.trim() ?: "",
+            graceDays = map["graceDays"]?.trim()?.toIntOrNull() ?: 7
+        )
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun resolveUpdateState(
+    config: AppControlConfig,
+    currentVersionCode: Int,
+    prefs: SharedPreferences
+): AppUpdateState {
+    if (config.status.uppercase() != "ACTIVE") {
+        return AppUpdateState.Maintenance(config.message)
+    }
+
+    if (currentVersionCode < config.minSupportedVersionCode) {
+        return AppUpdateState.ForceUpdate(config.apkUrl, config.latestVersionCode)
+    }
+
+    if (currentVersionCode < config.latestVersionCode) {
+        val now = System.currentTimeMillis()
+        val firstSeen = prefs.getLong(PREFS_KEY_FIRST_UPDATE_SEEN, 0L)
+        if (firstSeen == 0L) {
+            prefs.edit().putLong(PREFS_KEY_FIRST_UPDATE_SEEN, now).apply()
+        } else {
+            val daysSinceFirstSeen = TimeUnit.MILLISECONDS.toDays(now - firstSeen)
+            if (daysSinceFirstSeen >= config.graceDays) {
+                return AppUpdateState.ForceUpdate(config.apkUrl, config.latestVersionCode)
+            }
+        }
+        return AppUpdateState.UpdateAvailable(config.apkUrl, config.latestVersionCode)
+    }
+
+    // App is up to date — clear grace period tracker
+    prefs.edit().remove(PREFS_KEY_FIRST_UPDATE_SEEN).apply()
+    return AppUpdateState.Normal
 }
