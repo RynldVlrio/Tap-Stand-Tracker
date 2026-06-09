@@ -41,6 +41,8 @@ class TapStandRepository(
 
     suspend fun delete(id: Long) = tapStandDao.deleteById(id)
 
+    suspend fun getAllTapStandsOnce(): List<TapStandEntity> = tapStandDao.getAll()
+
     // ── Project / Folder operations ──────────────────────────────────────────
 
     fun getAllProjects(): Flow<List<ProjectEntity>> = projectDao.getAll()

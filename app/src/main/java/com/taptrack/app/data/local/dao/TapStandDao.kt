@@ -27,4 +27,7 @@ interface TapStandDao {
 
     @Query("DELETE FROM tap_stands WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM tap_stands ORDER BY createdAt DESC")
+    suspend fun getAll(): List<TapStandEntity>
 }
