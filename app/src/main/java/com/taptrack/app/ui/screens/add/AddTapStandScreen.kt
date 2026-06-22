@@ -571,7 +571,20 @@ private fun MeterFormItem(
             ) {
                 OutlinedTextField(
                     value = form.serialNumber,
-                    onValueChange = { onUpdate(form.copy(serialNumber = it)) },
+                    onValueChange = { newSerial ->
+                        val foundName = MeterLookup.lookup(newSerial)
+                        onUpdate(
+                            form.copy(
+                                serialNumber = newSerial,
+                                consumerName = when {
+                                    foundName != null -> foundName
+                                    form.isNameAutoFilled -> ""   // clear stale auto-fill when serial changes
+                                    else -> form.consumerName     // keep any manually-typed name
+                                },
+                                isNameAutoFilled = foundName != null
+                            )
+                        )
+                    },
                     label = { Text("Serial Number") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
