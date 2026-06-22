@@ -7,7 +7,7 @@
  *   3. Deploy → New deployment → Web app
  *      - Execute as: Me
  *      - Who has access: Anyone
- *   4. Copy the web app URL and update APP_CONTROL_CSV_URL in UpdateChecker.kt
+ *   4. Copy the web app URL and update APPS_SCRIPT_URL in UpdateChecker.kt
  *
  * Re-deploying after changes:
  *   Deploy → Manage deployments → Edit (pencil icon) → New version → Deploy
