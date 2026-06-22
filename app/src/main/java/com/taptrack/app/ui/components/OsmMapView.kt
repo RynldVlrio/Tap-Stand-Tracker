@@ -26,13 +26,16 @@ import com.taptrack.app.utils.createLocationDotBitmap
 import com.taptrack.app.utils.createTapMarkerBitmap
 import com.taptrack.app.utils.getLastKnownLocation
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
@@ -49,8 +52,10 @@ fun OsmMapView(
     initialLng: Double = 120.9842,
     zoom: Double = 15.0,
     showUserLocation: Boolean = true,
+    routePoints: List<GeoPoint>? = null,
     onMarkerClick: (TapStandWithMeters) -> Unit = {},
-    onMapViewReady: (MapView) -> Unit = {}
+    onMapViewReady: (MapView) -> Unit = {},
+    onLongPressLocation: ((Double, Double) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -85,6 +90,51 @@ fun OsmMapView(
             enableCompass()
             mapView.overlays.add(this)
         }
+    }
+
+    // Always-fresh reference to the long-press callback so the remember closure stays valid
+    val onLongPressRef = rememberUpdatedState(onLongPressLocation)
+
+    remember {
+        MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint?) = false
+            override fun longPressHelper(p: GeoPoint?): Boolean {
+                p ?: return false
+                val userLoc = myLocationOverlay.myLocation ?: return false
+                val handler = onLongPressRef.value ?: return false
+                val userPx  = mapView.projection.toPixels(userLoc, android.graphics.Point())
+                val pressPx = mapView.projection.toPixels(p, android.graphics.Point())
+                val dx = (userPx.x - pressPx.x).toFloat()
+                val dy = (userPx.y - pressPx.y).toFloat()
+                if (kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= 80.0) {
+                    handler(userLoc.latitude, userLoc.longitude)
+                    return true
+                }
+                return false
+            }
+        }).also { mapView.overlays.add(it) }
+    }
+
+    // Route polyline – drawn at index 0 so it sits below markers and user dot
+    val routeOverlay = remember { mutableStateOf<Polyline?>(null) }
+    LaunchedEffect(routePoints) {
+        routeOverlay.value?.let { mapView.overlays.remove(it) }
+        if (!routePoints.isNullOrEmpty()) {
+            val density = context.resources.displayMetrics.density
+            val line = Polyline().apply {
+                setPoints(routePoints)
+                outlinePaint.color = android.graphics.Color.parseColor("#4A90E2")
+                outlinePaint.strokeWidth = 9f * density
+                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                outlinePaint.isAntiAlias = true
+            }
+            mapView.overlays.add(0, line)
+            routeOverlay.value = line
+        } else {
+            routeOverlay.value = null
+        }
+        mapView.invalidate()
     }
 
     DisposableEffect(lifecycleOwner) {

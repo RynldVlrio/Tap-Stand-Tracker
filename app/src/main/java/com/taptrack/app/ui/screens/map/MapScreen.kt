@@ -6,6 +6,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
@@ -30,7 +32,14 @@ import com.taptrack.app.data.model.TapStandWithMeters
 import com.taptrack.app.ui.components.MapDownloadDialog
 import com.taptrack.app.ui.components.MapSearchBar
 import com.taptrack.app.ui.components.OsmMapView
+import com.taptrack.app.utils.RouteResult
+import com.taptrack.app.utils.fetchRoute
 import com.taptrack.app.utils.formatCoordinates
+import com.taptrack.app.utils.formatDistance
+import com.taptrack.app.utils.formatDuration
+import com.taptrack.app.utils.getLastKnownLocation
+import kotlinx.coroutines.launch
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import java.io.File
@@ -65,6 +74,9 @@ fun MapScreen(
     var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var showDownloadDialog by remember { mutableStateOf(false) }
+    var routeResult by remember { mutableStateOf<RouteResult?>(null) }
+    var isLoadingRoute by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(locationPermissions.allPermissionsGranted) {
         if (locationPermissions.allPermissionsGranted) {
@@ -79,8 +91,10 @@ fun MapScreen(
             locateTrigger = locateTrigger,
             searchTarget = searchTarget,
             modifier = Modifier.fillMaxSize(),
+            routePoints = routeResult?.points,
             onMarkerClick = { item -> vm.select(item) },
-            onMapViewReady = { mapViewRef = it }
+            onMapViewReady = { mapViewRef = it },
+            onLongPressLocation = { lat, lng -> onNavigateToAdd(lat, lng) }
         )
 
         // Search bar (collapsed by default — shows only icon)
@@ -111,6 +125,52 @@ fun MapScreen(
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
                 }
+            }
+
+            // Route info card (shown while a route is active)
+            routeResult?.let { result ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Navigation,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "${formatDistance(result.distanceMeters)} · ${formatDuration(result.durationSeconds)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { routeResult = null },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear route",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isLoadingRoute) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
         }
 
@@ -159,6 +219,33 @@ fun MapScreen(
                 onViewDetails = {
                     vm.select(null)
                     onNavigateToDetail(selected!!.tapStand.id)
+                },
+                onDirections = {
+                    val tapItem = selected!!
+                    val mv = mapViewRef
+                    vm.select(null)
+                    isLoadingRoute = true
+                    coroutineScope.launch {
+                        val loc = context.getLastKnownLocation()
+                        if (loc != null) {
+                            val result = fetchRoute(
+                                loc.latitude, loc.longitude,
+                                tapItem.tapStand.latitude, tapItem.tapStand.longitude,
+                                context.packageName
+                            )
+                            routeResult = result
+                            if (result != null && mv != null) {
+                                val bbox = BoundingBox(
+                                    maxOf(loc.latitude, tapItem.tapStand.latitude) + 0.002,
+                                    maxOf(loc.longitude, tapItem.tapStand.longitude) + 0.002,
+                                    minOf(loc.latitude, tapItem.tapStand.latitude) - 0.002,
+                                    minOf(loc.longitude, tapItem.tapStand.longitude) - 0.002
+                                )
+                                mv.post { mv.zoomToBoundingBox(bbox, true, 100) }
+                            }
+                        }
+                        isLoadingRoute = false
+                    }
                 }
             )
         }
@@ -178,7 +265,8 @@ fun MapScreen(
 @Composable
 private fun TapStandBottomSheet(
     item: TapStandWithMeters,
-    onViewDetails: () -> Unit
+    onViewDetails: () -> Unit,
+    onDirections: () -> Unit
 ) {
     val context = LocalContext.current
     Column(
@@ -244,38 +332,56 @@ private fun TapStandBottomSheet(
 
         Spacer(Modifier.height(16.dp))
 
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
-                onClick = {
-                    val lat = item.tapStand.latitude
-                    val lng = item.tapStand.longitude
-                    val label = Uri.encode(item.tapStand.name)
-                    val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)")
-                    try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
-                    } catch (_: Exception) {
-                        // No navigation app installed
-                    }
-                },
-                modifier = Modifier.weight(1f)
+                onClick = onDirections,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
-                    Icons.Default.Navigation,
+                    Icons.Default.Directions,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(Modifier.width(4.dp))
-                Text("Navigate")
+                Text("Show Route on Map")
             }
 
-            Button(
-                onClick = onViewDetails,
-                modifier = Modifier.weight(1f)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("View Details")
+                OutlinedButton(
+                    onClick = {
+                        val lat = item.tapStand.latitude
+                        val lng = item.tapStand.longitude
+                        val label = Uri.encode(item.tapStand.name)
+                        val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)")
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
+                        } catch (_: Exception) {
+                            // No navigation app installed
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.Navigation,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Navigate")
+                }
+
+                Button(
+                    onClick = onViewDetails,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("View Details")
+                }
             }
         }
     }
