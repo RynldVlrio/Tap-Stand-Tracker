@@ -7,8 +7,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
 
-private const val SHEET_ID = "1XLpVZehtAlPqtMb69El2qtmXJcC45l2nT0b2_aHqZ5Y"
-private const val SHEET_GID = "0" // AppControl tab gid from the sheet URL
+// Published CSV URL from Google Sheets: File → Share → Publish to web → AppControl → CSV
+private const val APP_CONTROL_CSV_URL =
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vSEi5JnHjl2_P9a2abrFZPt4n4CFQm4Zq1fPg9N3ODDSmGD9hYyOAl5vqV2J3rSdRVNIo0bZ-s7ieJi/pub?gid=0&single=true&output=csv"
 private const val PREFS_KEY_FIRST_UPDATE_SEEN = "first_update_seen_ms"
 
 data class AppControlConfig(
@@ -29,7 +30,7 @@ sealed class AppUpdateState {
 
 suspend fun fetchAppControl(): AppControlConfig? = withContext(Dispatchers.IO) {
     try {
-        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/pub?gid=$SHEET_GID&single=true&output=csv"
+        val url = APP_CONTROL_CSV_URL
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.apply {
             requestMethod = "GET"
