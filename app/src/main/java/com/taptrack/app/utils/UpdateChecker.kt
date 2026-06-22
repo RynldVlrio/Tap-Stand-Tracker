@@ -29,7 +29,7 @@ sealed class AppUpdateState {
 
 suspend fun fetchAppControl(): AppControlConfig? = withContext(Dispatchers.IO) {
     try {
-        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/export?format=csv&gid=$SHEET_GID"
+        val url = "https://docs.google.com/spreadsheets/d/$SHEET_ID/pub?gid=$SHEET_GID&single=true&output=csv"
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.apply {
             requestMethod = "GET"
