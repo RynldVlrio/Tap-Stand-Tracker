@@ -15,7 +15,8 @@ data class MeterForm(
     val serialNumber: String = "",
     val consumerName: String = "",
     val readingDate: String = "",
-    val initialReading: String = ""
+    val initialReading: String = "",
+    val isNameAutoFilled: Boolean = false
 )
 
 data class FormState(

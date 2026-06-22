@@ -4,9 +4,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -177,6 +180,7 @@ private fun TapStandBottomSheet(
     item: TapStandWithMeters,
     onViewDetails: () -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -240,11 +244,39 @@ private fun TapStandBottomSheet(
 
         Spacer(Modifier.height(16.dp))
 
-        Button(
-            onClick = onViewDetails,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("View Details")
+            OutlinedButton(
+                onClick = {
+                    val lat = item.tapStand.latitude
+                    val lng = item.tapStand.longitude
+                    val label = Uri.encode(item.tapStand.name)
+                    val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)")
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
+                    } catch (_: Exception) {
+                        // No navigation app installed
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    Icons.Default.Navigation,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Navigate")
+            }
+
+            Button(
+                onClick = onViewDetails,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("View Details")
+            }
         }
     }
 }

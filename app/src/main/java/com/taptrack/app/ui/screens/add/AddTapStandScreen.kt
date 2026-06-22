@@ -31,6 +31,7 @@ import com.taptrack.app.TapTrackApplication
 import com.taptrack.app.ui.components.BarcodeScanner
 import com.taptrack.app.ui.components.CameraCapture
 import com.taptrack.app.ui.components.CenterPinMapView
+import com.taptrack.app.utils.MeterLookup
 import com.taptrack.app.utils.formatCoordinates
 import com.taptrack.app.utils.locationFlow
 import java.io.File
@@ -464,7 +465,17 @@ fun AddTapStandScreen(
         BarcodeScanner(
             onBarcodeDetected = { value ->
                 val meter = state.meters.getOrNull(activeScannerIndex)
-                if (meter != null) vm.updateMeter(activeScannerIndex, meter.copy(serialNumber = value))
+                if (meter != null) {
+                    val foundName = MeterLookup.lookup(value)
+                    vm.updateMeter(
+                        activeScannerIndex,
+                        meter.copy(
+                            serialNumber = value,
+                            consumerName = foundName ?: meter.consumerName,
+                            isNameAutoFilled = foundName != null
+                        )
+                    )
+                }
                 scannerMeterIndex = null
             },
             onDismiss = { scannerMeterIndex = null }
@@ -585,10 +596,16 @@ private fun MeterFormItem(
             }
             OutlinedTextField(
                 value = form.consumerName,
-                onValueChange = { onUpdate(form.copy(consumerName = it)) },
+                onValueChange = { onUpdate(form.copy(consumerName = it, isNameAutoFilled = false)) },
                 label = { Text("Consumer Name") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                trailingIcon = if (form.isNameAutoFilled) {
+                    { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) }
+                } else null,
+                supportingText = if (form.isNameAutoFilled) {
+                    { Text("Auto-filled from meter list", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                } else null
             )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
