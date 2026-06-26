@@ -32,6 +32,91 @@ fun createLocationDotBitmap(context: Context): Bitmap {
     return bitmap
 }
 
+/** Orange star-pin used for user-defined landmarks on the map. */
+fun createLandmarkMarkerBitmap(context: Context, color: Int = Color.parseColor("#FF9800")): BitmapDrawable {
+    val dp = context.resources.displayMetrics.density
+    val size = (48 * dp).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+
+    val cx = size / 2f
+    val badgeR = size * 0.30f
+    val badgeCy = badgeR + size * 0.04f
+    val neckY = badgeCy + badgeR * 0.60f
+    val tipY = size * 0.97f
+
+    val colorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
+    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.argb(55, 0, 0, 0); style = Paint.Style.FILL }
+    val whitePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = Color.WHITE; style = Paint.Style.FILL }
+
+    // drop shadow
+    canvas.drawCircle(cx + dp, badgeCy + dp, badgeR, shadowPaint)
+    canvas.drawPath(Path().apply {
+        moveTo(cx - badgeR * 0.42f + dp, neckY + dp)
+        lineTo(cx + badgeR * 0.42f + dp, neckY + dp)
+        lineTo(cx + dp, tipY + dp)
+        close()
+    }, shadowPaint)
+
+    // badge + pointer
+    canvas.drawCircle(cx, badgeCy, badgeR, colorPaint)
+    canvas.drawPath(Path().apply {
+        moveTo(cx - badgeR * 0.42f, neckY)
+        lineTo(cx + badgeR * 0.42f, neckY)
+        lineTo(cx, tipY)
+        close()
+    }, colorPaint)
+
+    // white border ring
+    canvas.drawCircle(cx, badgeCy, badgeR, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = dp * 1.6f
+    })
+
+    // 5-pointed star inside badge
+    val starOuter = badgeR * 0.52f
+    val starInner = starOuter * 0.42f
+    val starPath = Path()
+    for (i in 0 until 5) {
+        val outerAngle = (-Math.PI / 2 + 2 * Math.PI * i / 5).toFloat()
+        val innerAngle = (outerAngle + Math.PI / 5).toFloat()
+        val ox = cx + starOuter * kotlin.math.cos(outerAngle)
+        val oy = badgeCy + starOuter * kotlin.math.sin(outerAngle)
+        val ix = cx + starInner * kotlin.math.cos(innerAngle)
+        val iy = badgeCy + starInner * kotlin.math.sin(innerAngle)
+        if (i == 0) starPath.moveTo(ox, oy) else starPath.lineTo(ox, oy)
+        starPath.lineTo(ix, iy)
+    }
+    starPath.close()
+    canvas.drawPath(starPath, whitePaint)
+
+    return BitmapDrawable(context.resources, bmp)
+}
+
+/** Small text-label bitmap for showing a boundary layer name on the map. */
+fun createBoundaryLabelBitmap(context: Context, text: String, borderColor: Int): BitmapDrawable {
+    val dp = context.resources.displayMetrics.density
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 11f * dp
+        color = borderColor or 0xFF000000.toInt()
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        setShadowLayer(2f * dp, 0f, 1f * dp, Color.argb(100, 0, 0, 0))
+    }
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(200, 255, 255, 255)
+        style = Paint.Style.FILL
+    }
+    val bounds = android.graphics.Rect()
+    textPaint.getTextBounds(text, 0, text.length, bounds)
+    val pad = 4f * dp
+    val w = bounds.width() + pad * 2
+    val h = bounds.height() + pad * 2
+    val bmp = Bitmap.createBitmap(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    canvas.drawRoundRect(android.graphics.RectF(0f, 0f, w, h), pad, pad, bgPaint)
+    canvas.drawText(text, pad, h - pad, textPaint)
+    return BitmapDrawable(context.resources, bmp)
+}
+
 fun createTapMarkerBitmap(context: Context, color: Int = Color.parseColor("#0277BD")): BitmapDrawable {
     val dp = context.resources.displayMetrics.density
     val size = (56 * dp).toInt()

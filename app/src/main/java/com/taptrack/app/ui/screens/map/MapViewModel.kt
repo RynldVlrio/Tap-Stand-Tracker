@@ -8,8 +8,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.taptrack.app.data.local.entity.BoundaryEntity
+import com.taptrack.app.data.local.entity.LandmarkEntity
 import com.taptrack.app.data.model.TapStandWithMeters
 import com.taptrack.app.data.repository.BoundaryRepository
+import com.taptrack.app.data.repository.LandmarkRepository
 import com.taptrack.app.data.repository.TapStandRepository
 import com.taptrack.app.utils.BoundaryParser
 import com.taptrack.app.utils.ParsedBoundary
@@ -28,7 +30,8 @@ sealed class BoundaryImportState {
 
 class MapViewModel(
     private val repository: TapStandRepository,
-    private val boundaryRepository: BoundaryRepository
+    private val boundaryRepository: BoundaryRepository,
+    private val landmarkRepository: LandmarkRepository
 ) : ViewModel() {
 
     val tapStands: StateFlow<List<TapStandWithMeters>> = repository.getAllWithMeters()
@@ -43,6 +46,12 @@ class MapViewModel(
     private val _boundaryOverlays = MutableStateFlow<List<BoundaryOverlay>>(emptyList())
     val boundaryOverlays: StateFlow<List<BoundaryOverlay>> = _boundaryOverlays.asStateFlow()
 
+    val landmarks: StateFlow<List<LandmarkEntity>> = landmarkRepository.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _selectedLandmark = MutableStateFlow<LandmarkEntity?>(null)
+    val selectedLandmark: StateFlow<LandmarkEntity?> = _selectedLandmark.asStateFlow()
+
     private val _importState = MutableStateFlow<BoundaryImportState>(BoundaryImportState.Idle)
     val importState: StateFlow<BoundaryImportState> = _importState.asStateFlow()
 
@@ -53,17 +62,21 @@ class MapViewModel(
             boundaries.collect { entities ->
                 withContext(Dispatchers.IO) {
                     entities.forEach { entity ->
-                        if (!parsedCache.containsKey(entity.id)) {
-                            loadAndCache(entity)
-                        }
+                        if (!parsedCache.containsKey(entity.id)) loadAndCache(entity)
                     }
                 }
-                _boundaryOverlays.value = entities
-                    .filter { it.isVisible }
-                    .mapNotNull { entity ->
-                        val parsed = parsedCache[entity.id] ?: return@mapNotNull null
-                        BoundaryOverlay(entity.id, entity.name, entity.color, parsed.polygons, parsed.polylines)
-                    }
+                _boundaryOverlays.value = entities.filter { it.isVisible }.mapNotNull { entity ->
+                    val parsed = parsedCache[entity.id] ?: return@mapNotNull null
+                    BoundaryOverlay(
+                        id = entity.id,
+                        name = entity.name,
+                        fillColor = entity.fillColor,
+                        borderColor = entity.borderColor,
+                        showLabel = entity.showLabel,
+                        polygons = parsed.polygons,
+                        polylines = parsed.polylines
+                    )
+                }
             }
         }
     }
@@ -87,6 +100,30 @@ class MapViewModel(
     }
 
     fun select(item: TapStandWithMeters?) { _selectedItem.value = item }
+
+    fun selectLandmark(landmark: LandmarkEntity?) { _selectedLandmark.value = landmark }
+
+    // ── Landmark operations ──────────────────────────────────────────────────
+
+    fun addLandmark(name: String, description: String, lat: Double, lng: Double) {
+        viewModelScope.launch {
+            landmarkRepository.insert(LandmarkEntity(name = name, description = description, latitude = lat, longitude = lng))
+        }
+    }
+
+    fun deleteLandmark(id: Long) {
+        viewModelScope.launch { landmarkRepository.delete(id) }
+    }
+
+    // ── Boundary style update ────────────────────────────────────────────────
+
+    fun updateBoundaryStyle(entity: BoundaryEntity, fillColor: Int, borderColor: Int, showLabel: Boolean) {
+        viewModelScope.launch {
+            boundaryRepository.update(entity.copy(fillColor = fillColor, borderColor = borderColor, showLabel = showLabel))
+        }
+    }
+
+    // ── Boundary import ──────────────────────────────────────────────────────
 
     fun importBoundary(context: Context, uri: Uri) {
         viewModelScope.launch {
@@ -122,24 +159,23 @@ class MapViewModel(
                     }
                 }
 
-                if (parsed == null) {
-                    _importState.value = BoundaryImportState.Error("Could not read file")
-                    return@launch
-                }
+                if (parsed == null) { _importState.value = BoundaryImportState.Error("Could not read file"); return@launch }
                 if (parsed.polygons.isEmpty() && parsed.polylines.isEmpty()) {
                     _importState.value = BoundaryImportState.Error(
-                        "No boundary geometry found.\nFor shapefiles: make sure to export as WGS84 (EPSG:4326) from QGIS.\nFor KMZ/KML: file may only contain point data."
+                        "No boundary geometry found.\nFor shapefiles: export as WGS84 (EPSG:4326) from QGIS.\nFor KMZ/KML: file may only contain point data."
                     )
                     return@launch
                 }
 
                 val savedFile = withContext(Dispatchers.IO) { saveToInternal(context, uri, fileName) }
                 val displayName = parsed.name.ifBlank { fileName.substringBeforeLast('.') }
+                val borderColor = nextColor()
                 val entity = BoundaryEntity(
                     name = displayName,
                     filePath = savedFile.absolutePath,
                     fileType = fileType,
-                    color = nextColor()
+                    borderColor = borderColor,
+                    fillColor = deriveFillColor(borderColor)
                 )
                 val id = boundaryRepository.insert(entity)
                 parsedCache[id] = parsed
@@ -178,11 +214,12 @@ class MapViewModel(
     private fun saveToInternal(context: Context, uri: Uri, fileName: String): File {
         val dir = File(context.filesDir, "boundaries").also { it.mkdirs() }
         val dest = File(dir, "${System.currentTimeMillis()}_$fileName")
-        context.contentResolver.openInputStream(uri)?.use { i ->
-            dest.outputStream().use { o -> i.copyTo(o) }
-        }
+        context.contentResolver.openInputStream(uri)?.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
         return dest
     }
+
+    private fun deriveFillColor(borderColor: Int) =
+        (borderColor and 0x00FFFFFF) or (0x30 shl 24)
 
     private var colorIdx = 0
     private val palette = listOf(
@@ -193,11 +230,14 @@ class MapViewModel(
     private fun nextColor() = palette[colorIdx++ % palette.size]
 
     companion object {
-        fun factory(repository: TapStandRepository, boundaryRepository: BoundaryRepository) =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    MapViewModel(repository, boundaryRepository) as T
-            }
+        fun factory(
+            repository: TapStandRepository,
+            boundaryRepository: BoundaryRepository,
+            landmarkRepository: LandmarkRepository
+        ) = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                MapViewModel(repository, boundaryRepository, landmarkRepository) as T
+        }
     }
 }

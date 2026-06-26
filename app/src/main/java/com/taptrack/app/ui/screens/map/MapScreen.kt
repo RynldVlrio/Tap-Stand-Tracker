@@ -9,13 +9,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Directions
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +26,11 @@ import coil.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.taptrack.app.TapTrackApplication
+import com.taptrack.app.data.local.entity.BoundaryEntity
+import com.taptrack.app.data.local.entity.LandmarkEntity
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.ui.components.AddLandmarkSheet
+import com.taptrack.app.ui.components.BoundaryColorEditDialog
 import com.taptrack.app.ui.components.BoundaryManagerSheet
 import com.taptrack.app.ui.components.MapDownloadDialog
 import com.taptrack.app.ui.components.MapSearchBar
@@ -58,64 +56,59 @@ fun MapScreen(
     val context = LocalContext.current
     val app = context.applicationContext as TapTrackApplication
     val vm: MapViewModel = viewModel(
-        factory = MapViewModel.factory(app.repository, app.boundaryRepository)
+        factory = MapViewModel.factory(app.repository, app.boundaryRepository, app.landmarkRepository)
     )
 
-    val tapStands by vm.tapStands.collectAsStateWithLifecycle()
-    val selected by vm.selectedItem.collectAsStateWithLifecycle()
-    val boundaries by vm.boundaries.collectAsStateWithLifecycle()
+    val tapStands        by vm.tapStands.collectAsStateWithLifecycle()
+    val selected         by vm.selectedItem.collectAsStateWithLifecycle()
+    val boundaries       by vm.boundaries.collectAsStateWithLifecycle()
     val boundaryOverlays by vm.boundaryOverlays.collectAsStateWithLifecycle()
-    val importState by vm.importState.collectAsStateWithLifecycle()
+    val landmarks        by vm.landmarks.collectAsStateWithLifecycle()
+    val selectedLandmark by vm.selectedLandmark.collectAsStateWithLifecycle()
+    val importState      by vm.importState.collectAsStateWithLifecycle()
 
     val locationPermissions = rememberMultiplePermissionsState(
-        listOf(
-            android.Manifest.permission.ACCESS_FINE_LOCATION,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
-        )
+        listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
     )
-
     LaunchedEffect(Unit) {
-        if (!locationPermissions.allPermissionsGranted) {
-            locationPermissions.launchMultiplePermissionRequest()
-        }
+        if (!locationPermissions.allPermissionsGranted) locationPermissions.launchMultiplePermissionRequest()
     }
 
-    var locateTrigger by remember { mutableIntStateOf(0) }
-    var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
-    var mapViewRef by remember { mutableStateOf<MapView?>(null) }
-    var showDownloadDialog by remember { mutableStateOf(false) }
-    var showLayersSheet by remember { mutableStateOf(false) }
-    var routeResult by remember { mutableStateOf<RouteResult?>(null) }
-    var isLoadingRoute by remember { mutableStateOf(false) }
+    var locateTrigger       by remember { mutableIntStateOf(0) }
+    var searchTarget        by remember { mutableStateOf<GeoPoint?>(null) }
+    var mapViewRef          by remember { mutableStateOf<MapView?>(null) }
+    var showDownloadDialog  by remember { mutableStateOf(false) }
+    var showLayersSheet     by remember { mutableStateOf(false) }
+    var routeResult         by remember { mutableStateOf<RouteResult?>(null) }
+    var isLoadingRoute      by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // File picker for boundary layer import
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    // Long-press state
+    var longPressLat     by remember { mutableDoubleStateOf(0.0) }
+    var longPressLng     by remember { mutableDoubleStateOf(0.0) }
+    var longPressNearUser by remember { mutableStateOf(false) }
+    var showPinChoiceSheet   by remember { mutableStateOf(false) }
+    var showAddLandmarkSheet by remember { mutableStateOf(false) }
+
+    // Boundary color editor
+    var editingBoundary by remember { mutableStateOf<BoundaryEntity?>(null) }
+
+    // File picker for boundary import
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { vm.importBoundary(context, it) }
     }
 
-    // Show import result as Toast
     LaunchedEffect(importState) {
-        when (val state = importState) {
-            is BoundaryImportState.Success -> {
-                Toast.makeText(context, "Layer \"${state.name}\" imported", Toast.LENGTH_SHORT).show()
-                vm.clearImportState()
-            }
-            is BoundaryImportState.Error -> {
-                Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
-                vm.clearImportState()
-            }
+        when (val s = importState) {
+            is BoundaryImportState.Success -> { Toast.makeText(context, "Layer \"${s.name}\" imported", Toast.LENGTH_SHORT).show(); vm.clearImportState() }
+            is BoundaryImportState.Error   -> { Toast.makeText(context, s.message, Toast.LENGTH_LONG).show(); vm.clearImportState() }
             else -> {}
         }
     }
-
     LaunchedEffect(locationPermissions.allPermissionsGranted) {
-        if (locationPermissions.allPermissionsGranted) {
-            locateTrigger++
-        }
+        if (locationPermissions.allPermissionsGranted) locateTrigger++
     }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Box(Modifier.fillMaxSize()) {
@@ -126,35 +119,27 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize(),
             routePoints = routeResult?.points,
             boundaryOverlays = boundaryOverlays,
+            landmarks = landmarks,
             onMarkerClick = { item -> vm.select(item) },
+            onLandmarkClick = { lm -> vm.selectLandmark(lm) },
             onMapViewReady = { mapViewRef = it },
-            onLongPressLocation = { lat, lng -> onNavigateToAdd(lat, lng) }
+            onLongPress = { lat, lng, nearUser ->
+                longPressLat = lat; longPressLng = lng; longPressNearUser = nearUser
+                showPinChoiceSheet = true
+            }
         )
 
-        // Search bar (collapsed by default — shows only icon)
         Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            MapSearchBar(
-                onResultSelected = { point, _ -> searchTarget = point },
-                modifier = Modifier.fillMaxWidth()
-            )
+            MapSearchBar(onResultSelected = { point, _ -> searchTarget = point }, modifier = Modifier.fillMaxWidth())
 
             if (!locationPermissions.allPermissionsGranted) {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp)) {
                     Text(
                         text = "Location permission required for GPS tagging",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer
                     )
@@ -162,129 +147,136 @@ fun MapScreen(
             }
 
             routeResult?.let { result ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Navigation,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "${formatDistance(result.distanceMeters)} · ${formatDuration(result.durationSeconds)}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = { routeResult = null },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Clear route",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(16.dp)
-                            )
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Default.Navigation, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+                        Text(text = "${formatDistance(result.distanceMeters)} · ${formatDuration(result.durationSeconds)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { routeResult = null }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear route", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
                         }
                     }
                 }
             }
-
-            if (isLoadingRoute) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            if (isLoadingRoute) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
-        // FABs stacked at bottom-end
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.End
         ) {
-            // Download offline map
             SmallFloatingActionButton(
                 onClick = { showDownloadDialog = true },
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-            ) {
-                Icon(imageVector = Icons.Default.Download, contentDescription = "Download map area for offline use")
-            }
+            ) { Icon(Icons.Default.Download, contentDescription = "Download map area") }
 
-            // Map layers (boundary overlays)
             SmallFloatingActionButton(
                 onClick = { showLayersSheet = true },
-                containerColor = if (boundaries.isNotEmpty())
-                    MaterialTheme.colorScheme.tertiaryContainer
-                else
-                    MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = if (boundaries.isNotEmpty())
-                    MaterialTheme.colorScheme.onTertiaryContainer
-                else
-                    MaterialTheme.colorScheme.onSecondaryContainer
-            ) {
-                Icon(imageVector = Icons.Default.Layers, contentDescription = "Map layers")
-            }
+                containerColor = if (boundaries.isNotEmpty()) MaterialTheme.colorScheme.tertiaryContainer
+                                 else MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (boundaries.isNotEmpty()) MaterialTheme.colorScheme.onTertiaryContainer
+                               else MaterialTheme.colorScheme.onSecondaryContainer
+            ) { Icon(Icons.Default.Layers, contentDescription = "Map layers") }
 
-            // Locate me — Google Maps style blue circle
             FloatingActionButton(
                 onClick = { locateTrigger++ },
                 containerColor = Color(0xFF1A73E8),
                 contentColor = Color.White,
                 shape = CircleShape
+            ) { Icon(Icons.Default.MyLocation, contentDescription = "Go to my location") }
+        }
+    }
+
+    // ── Loading indicator ────────────────────────────────────────────────────
+    if (importState is BoundaryImportState.Loading) {
+        AlertDialog(onDismissRequest = {}, confirmButton = {}, title = { Text("Importing layer…") },
+            text = { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) })
+    }
+
+    // ── Long-press pin choice sheet ──────────────────────────────────────────
+    if (showPinChoiceSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPinChoiceSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(imageVector = Icons.Default.MyLocation, contentDescription = "Go to my location")
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Column {
+                        Text("Pinned Location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(formatCoordinates(longPressLat, longPressLng), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (longPressNearUser) {
+                    OutlinedButton(
+                        onClick = { showPinChoiceSheet = false; onNavigateToAdd(longPressLat, longPressLng) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.WaterDrop, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add Tap Stand here")
+                    }
+                }
+                Button(
+                    onClick = { showPinChoiceSheet = false; showAddLandmarkSheet = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Pin Landmark here")
+                }
             }
         }
     }
 
-    // Loading indicator while importing
-    if (importState is BoundaryImportState.Loading) {
-        AlertDialog(
-            onDismissRequest = {},
-            confirmButton = {},
-            title = { Text("Importing layer…") },
-            text = { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
-        )
+    // ── Add landmark sheet ───────────────────────────────────────────────────
+    if (showAddLandmarkSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddLandmarkSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            AddLandmarkSheet(
+                latitude = longPressLat,
+                longitude = longPressLng,
+                onSave = { name, desc ->
+                    vm.addLandmark(name, desc, longPressLat, longPressLng)
+                    showAddLandmarkSheet = false
+                },
+                onDismiss = { showAddLandmarkSheet = false }
+            )
+        }
     }
 
-    if (selected != null) {
+    // ── Landmark detail sheet ────────────────────────────────────────────────
+    if (selectedLandmark != null) {
         ModalBottomSheet(
-            onDismissRequest = { vm.select(null) },
-            sheetState = sheetState
+            onDismissRequest = { vm.selectLandmark(null) },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
+            LandmarkBottomSheet(
+                landmark = selectedLandmark!!,
+                onDelete = { vm.deleteLandmark(selectedLandmark!!.id); vm.selectLandmark(null) },
+                onDismiss = { vm.selectLandmark(null) }
+            )
+        }
+    }
+
+    // ── Tap stand detail sheet ───────────────────────────────────────────────
+    if (selected != null) {
+        ModalBottomSheet(onDismissRequest = { vm.select(null) }, sheetState = sheetState) {
             TapStandBottomSheet(
                 item = selected!!,
-                onViewDetails = {
-                    vm.select(null)
-                    onNavigateToDetail(selected!!.tapStand.id)
-                },
+                onViewDetails = { vm.select(null); onNavigateToDetail(selected!!.tapStand.id) },
                 onDirections = {
-                    val tapItem = selected!!
-                    val mv = mapViewRef
-                    vm.select(null)
-                    isLoadingRoute = true
+                    val tapItem = selected!!; val mv = mapViewRef; vm.select(null); isLoadingRoute = true
                     coroutineScope.launch {
                         val loc = context.getLastKnownLocation()
                         if (loc != null) {
-                            val result = fetchRoute(
-                                loc.latitude, loc.longitude,
-                                tapItem.tapStand.latitude, tapItem.tapStand.longitude,
-                                context.packageName
-                            )
+                            val result = fetchRoute(loc.latitude, loc.longitude, tapItem.tapStand.latitude, tapItem.tapStand.longitude, context.packageName)
                             routeResult = result
                             if (result != null && mv != null) {
                                 val bbox = BoundingBox(
@@ -303,6 +295,7 @@ fun MapScreen(
         }
     }
 
+    // ── Layers sheet ─────────────────────────────────────────────────────────
     if (showLayersSheet) {
         ModalBottomSheet(
             onDismissRequest = { showLayersSheet = false },
@@ -312,135 +305,107 @@ fun MapScreen(
                 boundaries = boundaries,
                 onToggleVisibility = { vm.toggleVisibility(it) },
                 onDelete = { vm.deleteBoundary(it) },
-                onImport = {
-                    showLayersSheet = false
-                    importLauncher.launch(arrayOf("*/*"))
-                }
+                onEditStyle = { boundary -> editingBoundary = boundary; showLayersSheet = false },
+                onImport = { showLayersSheet = false; importLauncher.launch(arrayOf("*/*")) }
             )
         }
     }
 
+    // ── Boundary color edit dialog ────────────────────────────────────────────
+    editingBoundary?.let { entity ->
+        BoundaryColorEditDialog(
+            entity = entity,
+            onDismiss = { editingBoundary = null },
+            onApply = { fill, border, label ->
+                vm.updateBoundaryStyle(entity, fill, border, label)
+                editingBoundary = null
+            }
+        )
+    }
+
     if (showDownloadDialog) {
-        val mv = mapViewRef
-        if (mv != null) {
-            MapDownloadDialog(
-                mapView = mv,
-                onDismiss = { showDownloadDialog = false }
-            )
+        mapViewRef?.let { MapDownloadDialog(mapView = it, onDismiss = { showDownloadDialog = false }) }
+    }
+}
+
+@Composable
+private fun LandmarkBottomSheet(
+    landmark: LandmarkEntity,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(28.dp))
+            Column(Modifier.weight(1f)) {
+                Text(landmark.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(formatCoordinates(landmark.latitude, landmark.longitude), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (landmark.description.isNotBlank()) {
+            Text(landmark.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Close") }
+            Button(
+                onClick = onDelete,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Delete")
+            }
         }
     }
 }
 
 @Composable
-private fun TapStandBottomSheet(
-    item: TapStandWithMeters,
-    onViewDetails: () -> Unit,
-    onDirections: () -> Unit
-) {
+private fun TapStandBottomSheet(item: TapStandWithMeters, onViewDetails: () -> Unit, onDirections: () -> Unit) {
     val context = LocalContext.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 32.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             val photoFile = File(item.tapStand.photoPath)
             if (item.tapStand.photoPath.isNotEmpty() && photoFile.exists()) {
-                AsyncImage(
-                    model = photoFile,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop
-                )
+                AsyncImage(model = photoFile, contentDescription = null,
+                    modifier = Modifier.size(80.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
             } else {
-                Surface(
-                    modifier = Modifier.size(80.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
+                Surface(modifier = Modifier.size(80.dp), shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.LocationOn,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp)
-                        )
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
                     }
                 }
             }
-
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = item.tapStand.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Text(item.tapStand.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    text = formatCoordinates(item.tapStand.latitude, item.tapStand.longitude),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text(formatCoordinates(item.tapStand.latitude, item.tapStand.longitude), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(2.dp))
-                Text(
-                    text = "${item.meters.size} meter(s) installed",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("${item.meters.size} meter(s) installed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(4.dp))
                 StatusChip(item.tapStand.status)
             }
         }
-
         Spacer(Modifier.height(16.dp))
-
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedButton(
-                onClick = onDirections,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onDirections, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Show Route on Map")
+                Spacer(Modifier.width(4.dp)); Text("Show Route on Map")
             }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
-                        val lat = item.tapStand.latitude
-                        val lng = item.tapStand.longitude
+                        val lat = item.tapStand.latitude; val lng = item.tapStand.longitude
                         val label = Uri.encode(item.tapStand.name)
                         val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)")
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
-                        } catch (_: Exception) { }
+                        try { context.startActivity(Intent(Intent.ACTION_VIEW, geoUri)) } catch (_: Exception) {}
                     },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Navigate")
-                }
-
-                Button(
-                    onClick = onViewDetails,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("View Details")
-                }
+                ) { Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Navigate") }
+                Button(onClick = onViewDetails, modifier = Modifier.weight(1f)) { Text("View Details") }
             }
         }
     }
@@ -449,16 +414,11 @@ private fun TapStandBottomSheet(
 @Composable
 fun StatusChip(status: String) {
     val (containerColor, contentColor) = when (status) {
-        "Active" -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        "Active"   -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
         "Inactive" -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
-        else -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        else       -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
     }
     Surface(shape = RoundedCornerShape(50), color = containerColor) {
-        Text(
-            text = status,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = contentColor
-        )
+        Text(status, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = contentColor)
     }
 }

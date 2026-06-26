@@ -21,8 +21,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.taptrack.app.data.local.entity.LandmarkEntity
 import com.taptrack.app.data.model.TapStandWithMeters
 import com.taptrack.app.ui.screens.map.BoundaryOverlay
+import com.taptrack.app.utils.createBoundaryLabelBitmap
+import com.taptrack.app.utils.createLandmarkMarkerBitmap
 import com.taptrack.app.utils.createLocationDotBitmap
 import com.taptrack.app.utils.createTapMarkerBitmap
 import com.taptrack.app.utils.getLastKnownLocation
@@ -56,16 +59,19 @@ fun OsmMapView(
     showUserLocation: Boolean = true,
     routePoints: List<GeoPoint>? = null,
     boundaryOverlays: List<BoundaryOverlay> = emptyList(),
+    landmarks: List<LandmarkEntity> = emptyList(),
     onMarkerClick: (TapStandWithMeters) -> Unit = {},
+    onLandmarkClick: (LandmarkEntity) -> Unit = {},
     onMapViewReady: (MapView) -> Unit = {},
-    onLongPressLocation: ((Double, Double) -> Unit)? = null
+    /** Fires on every long press. nearUser=true when pressing within ~80px of GPS dot. */
+    onLongPress: ((lat: Double, lng: Double, nearUser: Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     Configuration.getInstance().userAgentValue = context.packageName
 
-    val markerIcon = remember { createTapMarkerBitmap(context) }
+    val tapMarkerIcon = remember { createTapMarkerBitmap(context) }
 
     val mapView = remember {
         MapView(context).apply {
@@ -95,30 +101,32 @@ fun OsmMapView(
         }
     }
 
-    // Always-fresh reference to the long-press callback so the remember closure stays valid
-    val onLongPressRef = rememberUpdatedState(onLongPressLocation)
+    val onLongPressRef = rememberUpdatedState(onLongPress)
 
     remember {
         MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?) = false
             override fun longPressHelper(p: GeoPoint?): Boolean {
                 p ?: return false
-                val userLoc = myLocationOverlay.myLocation ?: return false
                 val handler = onLongPressRef.value ?: return false
-                val userPx  = mapView.projection.toPixels(userLoc, android.graphics.Point())
-                val pressPx = mapView.projection.toPixels(p, android.graphics.Point())
-                val dx = (userPx.x - pressPx.x).toFloat()
-                val dy = (userPx.y - pressPx.y).toFloat()
-                if (kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= 80.0) {
-                    handler(userLoc.latitude, userLoc.longitude)
-                    return true
-                }
-                return false
+                val userLoc = myLocationOverlay.myLocation
+                val nearUser = if (userLoc != null) {
+                    val userPx  = mapView.projection.toPixels(userLoc, android.graphics.Point())
+                    val pressPx = mapView.projection.toPixels(p, android.graphics.Point())
+                    val dx = (userPx.x - pressPx.x).toFloat()
+                    val dy = (userPx.y - pressPx.y).toFloat()
+                    kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= 80.0
+                } else false
+                // Use precise GPS coords for tap stand accuracy; pressed coords for landmarks
+                val finalLat = if (nearUser && userLoc != null) userLoc.latitude else p.latitude
+                val finalLng = if (nearUser && userLoc != null) userLoc.longitude else p.longitude
+                handler(finalLat, finalLng, nearUser)
+                return true
             }
         }).also { mapView.overlays.add(it) }
     }
 
-    // Boundary overlays – polygons and polylines drawn below everything else
+    // ── Boundary polygon/polyline overlays ───────────────────────────────────
     val activeBoundaryOverlays = remember { mutableListOf<org.osmdroid.views.overlay.Overlay>() }
     LaunchedEffect(boundaryOverlays) {
         activeBoundaryOverlays.forEach { mapView.overlays.remove(it) }
@@ -126,30 +134,22 @@ fun OsmMapView(
 
         val density = context.resources.displayMetrics.density
         for (overlay in boundaryOverlays) {
-            val base = overlay.color
-            val r = (base shr 16) and 0xFF
-            val g = (base shr 8) and 0xFF
-            val b = base and 0xFF
-            val fillColor = (0x30 shl 24) or (r shl 16) or (g shl 8) or b
-            val strokeColor = (0xDD shl 24) or (r shl 16) or (g shl 8) or b
-
             for (ring in overlay.polygons) {
                 val poly = OsmPolygon().apply {
                     points = ring.toMutableList()
-                    fillPaint.color = fillColor
+                    fillPaint.color = overlay.fillColor
                     fillPaint.style = android.graphics.Paint.Style.FILL
-                    outlinePaint.color = strokeColor
+                    outlinePaint.color = overlay.borderColor
                     outlinePaint.strokeWidth = 2.5f * density
                     outlinePaint.style = android.graphics.Paint.Style.STROKE
                 }
                 mapView.overlays.add(0, poly)
                 activeBoundaryOverlays.add(poly)
             }
-
             for (line in overlay.polylines) {
                 val polyline = Polyline().apply {
                     setPoints(line)
-                    outlinePaint.color = strokeColor
+                    outlinePaint.color = overlay.borderColor
                     outlinePaint.strokeWidth = 3.5f * density
                     outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
                     outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
@@ -158,11 +158,26 @@ fun OsmMapView(
                 mapView.overlays.add(0, polyline)
                 activeBoundaryOverlays.add(polyline)
             }
+            // Label marker at polygon/polyline centroid
+            if (overlay.showLabel) {
+                val centroid = computeCentroid(overlay.polygons, overlay.polylines)
+                if (centroid != null) {
+                    val labelIcon = createBoundaryLabelBitmap(context, overlay.name, overlay.borderColor)
+                    val labelMarker = Marker(mapView).apply {
+                        position = centroid
+                        icon = labelIcon
+                        setAnchor(0.5f, 0.5f)
+                        title = overlay.name
+                    }
+                    mapView.overlays.add(labelMarker)
+                    activeBoundaryOverlays.add(labelMarker)
+                }
+            }
         }
         mapView.invalidate()
     }
 
-    // Route polyline – drawn at index 0 so it sits below markers and user dot
+    // ── Route polyline ───────────────────────────────────────────────────────
     val routeOverlay = remember { mutableStateOf<Polyline?>(null) }
     LaunchedEffect(routePoints) {
         routeOverlay.value?.let { mapView.overlays.remove(it) }
@@ -209,16 +224,13 @@ fun OsmMapView(
         }
     }
 
-    // Animate to user's location when the FAB triggers it (or on auto-center at startup)
     LaunchedEffect(locateTrigger) {
         if (locateTrigger > 0) {
             val location = myLocationOverlay.myLocation
-                ?: context.getLastKnownLocation()
-                    ?.let { GeoPoint(it.latitude, it.longitude) }
+                ?: context.getLastKnownLocation()?.let { GeoPoint(it.latitude, it.longitude) }
             if (location != null) {
                 mapView.controller.animateTo(location)
             } else {
-                // No cached location yet — center as soon as GPS gets its first fix
                 myLocationOverlay.runOnFirstFix {
                     myLocationOverlay.myLocation?.let { point ->
                         mapView.post { mapView.controller.animateTo(point) }
@@ -228,27 +240,46 @@ fun OsmMapView(
         }
     }
 
-    // Animate to a searched location
     LaunchedEffect(searchTarget) {
-        searchTarget?.let {
-            mapView.controller.animateTo(it, 17.0, 1000L)
-        }
+        searchTarget?.let { mapView.controller.animateTo(it, 17.0, 1000L) }
     }
 
+    // ── Tap stand markers ────────────────────────────────────────────────────
+    val tapStandMarkers = remember { mutableListOf<Marker>() }
     LaunchedEffect(tapStands) {
-        mapView.overlays.removeAll { it is Marker }
+        tapStandMarkers.forEach { mapView.overlays.remove(it) }
+        tapStandMarkers.clear()
         tapStands.forEach { item ->
             val marker = Marker(mapView).apply {
                 position = GeoPoint(item.tapStand.latitude, item.tapStand.longitude)
                 title = item.tapStand.name
-                icon = markerIcon
+                icon = tapMarkerIcon
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                setOnMarkerClickListener { _, _ ->
-                    onMarkerClick(item)
-                    true
-                }
+                setOnMarkerClickListener { _, _ -> onMarkerClick(item); true }
             }
             mapView.overlays.add(marker)
+            tapStandMarkers.add(marker)
+        }
+        mapView.invalidate()
+    }
+
+    // ── Landmark markers ─────────────────────────────────────────────────────
+    val landmarkMarkers = remember { mutableListOf<Marker>() }
+    LaunchedEffect(landmarks) {
+        landmarkMarkers.forEach { mapView.overlays.remove(it) }
+        landmarkMarkers.clear()
+        landmarks.forEach { lm ->
+            val icon = createLandmarkMarkerBitmap(context, lm.color)
+            val marker = Marker(mapView).apply {
+                position = GeoPoint(lm.latitude, lm.longitude)
+                title = lm.name
+                snippet = lm.description.ifBlank { null }
+                this.icon = icon
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                setOnMarkerClickListener { _, _ -> onLandmarkClick(lm); true }
+            }
+            mapView.overlays.add(marker)
+            landmarkMarkers.add(marker)
         }
         mapView.invalidate()
     }
@@ -257,18 +288,16 @@ fun OsmMapView(
         factory = { mapView },
         modifier = modifier,
         update = { view ->
-            // Position compass at top-right once the view has been measured
-            view.post {
-                compassOverlay.setCompassCenter(view.width - 80f, 80f)
-            }
+            view.post { compassOverlay.setCompassCenter(view.width - 80f, 80f) }
         }
     )
 }
 
-/**
- * Map for picking a location: the pin is fixed at the center of the view as a
- * Compose overlay; the user moves the map underneath to choose a spot.
- */
+private fun computeCentroid(polygons: List<List<GeoPoint>>, polylines: List<List<GeoPoint>>): GeoPoint? {
+    val all = (polygons.flatten() + polylines.flatten()).ifEmpty { return null }
+    return GeoPoint(all.sumOf { it.latitude } / all.size, all.sumOf { it.longitude } / all.size)
+}
+
 @Composable
 fun CenterPinMapView(
     lat: Double,
@@ -291,18 +320,13 @@ fun CenterPinMapView(
         }
     }
 
-    // Report new center whenever the user scrolls or zooms
     DisposableEffect(Unit) {
         val listener = object : MapListener {
             override fun onScroll(event: ScrollEvent): Boolean {
-                val c = mapView.mapCenter
-                currentOnLocationPicked(c.latitude, c.longitude)
-                return false
+                val c = mapView.mapCenter; currentOnLocationPicked(c.latitude, c.longitude); return false
             }
             override fun onZoom(event: ZoomEvent): Boolean {
-                val c = mapView.mapCenter
-                currentOnLocationPicked(c.latitude, c.longitude)
-                return false
+                val c = mapView.mapCenter; currentOnLocationPicked(c.latitude, c.longitude); return false
             }
         }
         mapView.addMapListener(listener)
@@ -318,51 +342,21 @@ fun CenterPinMapView(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            mapView.onDetach()
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); mapView.onDetach() }
     }
 
     val pinColor = MaterialTheme.colorScheme.primary
 
     Box(modifier = modifier) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
-
-        // Fixed pin overlay — tip lands exactly at map center
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            // Drop shadow ellipse at the tip
-            Box(
-                modifier = Modifier
-                    .size(width = 18.dp, height = 6.dp)
-                    .background(Color.Black.copy(alpha = 0.22f), RoundedCornerShape(50))
-            )
-            // Modern teardrop pin — Canvas so tip lands at center
-            Canvas(
-                modifier = Modifier
-                    .size(52.dp)
-                    .offset(y = (-26).dp)
-            ) {
-                val w = size.width
-                val h = size.height
-                val cx = w / 2f
-                val radius = w * 0.38f
-                val cy = radius + 3f
-
-                // Soft shadow under the balloon
-                drawCircle(
-                    color = Color.Black.copy(alpha = 0.18f),
-                    radius = radius + 2f,
-                    center = Offset(cx + 2f, cy + 4f)
-                )
-                // Balloon circle
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(width = 18.dp, height = 6.dp).background(Color.Black.copy(alpha = 0.22f), RoundedCornerShape(50)))
+            Canvas(modifier = Modifier.size(52.dp).offset(y = (-26).dp)) {
+                val w = size.width; val h = size.height; val cx = w / 2f
+                val radius = w * 0.38f; val cy = radius + 3f
+                drawCircle(Color.Black.copy(alpha = 0.18f), radius = radius + 2f, center = Offset(cx + 2f, cy + 4f))
                 drawCircle(pinColor, radius = radius, center = Offset(cx, cy))
-                // White inner dot
                 drawCircle(Color.White, radius = radius * 0.4f, center = Offset(cx, cy))
-                // Teardrop pointer
                 val path = Path().apply {
                     moveTo(cx - radius * 0.5f, cy + radius * 0.65f)
                     lineTo(cx + radius * 0.5f, cy + radius * 0.65f)

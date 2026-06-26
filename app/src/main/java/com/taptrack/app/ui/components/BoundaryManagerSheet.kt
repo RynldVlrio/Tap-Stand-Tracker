@@ -1,6 +1,7 @@
 package com.taptrack.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,8 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +26,7 @@ fun BoundaryManagerSheet(
     boundaries: List<BoundaryEntity>,
     onToggleVisibility: (BoundaryEntity) -> Unit,
     onDelete: (BoundaryEntity) -> Unit,
+    onEditStyle: (BoundaryEntity) -> Unit,
     onImport: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -33,10 +36,7 @@ fun BoundaryManagerSheet(
             .padding(horizontal = 16.dp)
             .padding(bottom = 32.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(8.dp))
             Text(
@@ -83,6 +83,7 @@ fun BoundaryManagerSheet(
                     BoundaryLayerRow(
                         boundary = boundary,
                         onToggle = { onToggleVisibility(boundary) },
+                        onEditStyle = { onEditStyle(boundary) },
                         onDelete = { onDelete(boundary) }
                     )
                 }
@@ -95,25 +96,25 @@ fun BoundaryManagerSheet(
 private fun BoundaryLayerRow(
     boundary: BoundaryEntity,
     onToggle: () -> Unit,
+    onEditStyle: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 1.dp
-    ) {
+    Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(8.dp), tonalElevation = 1.dp) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Color swatch: fill inside, border outside
             Box(
                 modifier = Modifier
-                    .size(14.dp)
-                    .background(Color(boundary.color), CircleShape)
+                    .size(18.dp)
+                    .background(Color(boundary.fillColor), CircleShape)
+                    .border(2.dp, Color(boundary.borderColor), CircleShape)
             )
+
             Column(Modifier.weight(1f)) {
                 Text(
                     text = boundary.name,
@@ -127,18 +128,15 @@ private fun BoundaryLayerRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Switch(
-                checked = boundary.isVisible,
-                onCheckedChange = { onToggle() },
-                modifier = Modifier.height(24.dp)
-            )
+
+            Switch(checked = boundary.isVisible, onCheckedChange = { onToggle() }, modifier = Modifier.height(24.dp))
+
+            IconButton(onClick = onEditStyle, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Palette, contentDescription = "Edit style", modifier = Modifier.size(18.dp))
+            }
+
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete layer",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp)
-                )
+                Icon(Icons.Default.Delete, contentDescription = "Delete layer", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
             }
         }
     }
