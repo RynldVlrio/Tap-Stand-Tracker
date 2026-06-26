@@ -6,9 +6,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
@@ -29,6 +33,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.taptrack.app.TapTrackApplication
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.ui.components.BoundaryManagerSheet
 import com.taptrack.app.ui.components.MapDownloadDialog
 import com.taptrack.app.ui.components.MapSearchBar
 import com.taptrack.app.ui.components.OsmMapView
@@ -52,10 +57,15 @@ fun MapScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as TapTrackApplication
-    val vm: MapViewModel = viewModel(factory = MapViewModel.factory(app.repository))
+    val vm: MapViewModel = viewModel(
+        factory = MapViewModel.factory(app.repository, app.boundaryRepository)
+    )
 
     val tapStands by vm.tapStands.collectAsStateWithLifecycle()
     val selected by vm.selectedItem.collectAsStateWithLifecycle()
+    val boundaries by vm.boundaries.collectAsStateWithLifecycle()
+    val boundaryOverlays by vm.boundaryOverlays.collectAsStateWithLifecycle()
+    val importState by vm.importState.collectAsStateWithLifecycle()
 
     val locationPermissions = rememberMultiplePermissionsState(
         listOf(
@@ -74,9 +84,32 @@ fun MapScreen(
     var searchTarget by remember { mutableStateOf<GeoPoint?>(null) }
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
     var showDownloadDialog by remember { mutableStateOf(false) }
+    var showLayersSheet by remember { mutableStateOf(false) }
     var routeResult by remember { mutableStateOf<RouteResult?>(null) }
     var isLoadingRoute by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    // File picker for boundary layer import
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { vm.importBoundary(context, it) }
+    }
+
+    // Show import result as Toast
+    LaunchedEffect(importState) {
+        when (val state = importState) {
+            is BoundaryImportState.Success -> {
+                Toast.makeText(context, "Layer \"${state.name}\" imported", Toast.LENGTH_SHORT).show()
+                vm.clearImportState()
+            }
+            is BoundaryImportState.Error -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+                vm.clearImportState()
+            }
+            else -> {}
+        }
+    }
 
     LaunchedEffect(locationPermissions.allPermissionsGranted) {
         if (locationPermissions.allPermissionsGranted) {
@@ -92,6 +125,7 @@ fun MapScreen(
             searchTarget = searchTarget,
             modifier = Modifier.fillMaxSize(),
             routePoints = routeResult?.points,
+            boundaryOverlays = boundaryOverlays,
             onMarkerClick = { item -> vm.select(item) },
             onMapViewReady = { mapViewRef = it },
             onLongPressLocation = { lat, lng -> onNavigateToAdd(lat, lng) }
@@ -127,7 +161,6 @@ fun MapScreen(
                 }
             }
 
-            // Route info card (shown while a route is active)
             routeResult?.let { result ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -188,10 +221,22 @@ fun MapScreen(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             ) {
-                Icon(
-                    imageVector = Icons.Default.Download,
-                    contentDescription = "Download map area for offline use"
-                )
+                Icon(imageVector = Icons.Default.Download, contentDescription = "Download map area for offline use")
+            }
+
+            // Map layers (boundary overlays)
+            SmallFloatingActionButton(
+                onClick = { showLayersSheet = true },
+                containerColor = if (boundaries.isNotEmpty())
+                    MaterialTheme.colorScheme.tertiaryContainer
+                else
+                    MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (boundaries.isNotEmpty())
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                else
+                    MaterialTheme.colorScheme.onSecondaryContainer
+            ) {
+                Icon(imageVector = Icons.Default.Layers, contentDescription = "Map layers")
             }
 
             // Locate me — Google Maps style blue circle
@@ -201,12 +246,19 @@ fun MapScreen(
                 contentColor = Color.White,
                 shape = CircleShape
             ) {
-                Icon(
-                    imageVector = Icons.Default.MyLocation,
-                    contentDescription = "Go to my location"
-                )
+                Icon(imageVector = Icons.Default.MyLocation, contentDescription = "Go to my location")
             }
         }
+    }
+
+    // Loading indicator while importing
+    if (importState is BoundaryImportState.Loading) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Importing layer…") },
+            text = { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+        )
     }
 
     if (selected != null) {
@@ -246,6 +298,23 @@ fun MapScreen(
                         }
                         isLoadingRoute = false
                     }
+                }
+            )
+        }
+    }
+
+    if (showLayersSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showLayersSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            BoundaryManagerSheet(
+                boundaries = boundaries,
+                onToggleVisibility = { vm.toggleVisibility(it) },
+                onDelete = { vm.deleteBoundary(it) },
+                onImport = {
+                    showLayersSheet = false
+                    importLauncher.launch(arrayOf("*/*"))
                 }
             )
         }
@@ -340,11 +409,7 @@ private fun TapStandBottomSheet(
                 onClick = onDirections,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    Icons.Default.Directions,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
+                Icon(Icons.Default.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Show Route on Map")
             }
@@ -361,17 +426,11 @@ private fun TapStandBottomSheet(
                         val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($label)")
                         try {
                             context.startActivity(Intent(Intent.ACTION_VIEW, geoUri))
-                        } catch (_: Exception) {
-                            // No navigation app installed
-                        }
+                        } catch (_: Exception) { }
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        Icons.Default.Navigation,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(Icons.Default.Navigation, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Navigate")
                 }
@@ -394,10 +453,7 @@ fun StatusChip(status: String) {
         "Inactive" -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
         else -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
     }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = containerColor
-    ) {
+    Surface(shape = RoundedCornerShape(50), color = containerColor) {
         Text(
             text = status,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),

@@ -22,6 +22,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.taptrack.app.data.model.TapStandWithMeters
+import com.taptrack.app.ui.screens.map.BoundaryOverlay
 import com.taptrack.app.utils.createLocationDotBitmap
 import com.taptrack.app.utils.createTapMarkerBitmap
 import com.taptrack.app.utils.getLastKnownLocation
@@ -35,6 +36,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon as OsmPolygon
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
@@ -53,6 +55,7 @@ fun OsmMapView(
     zoom: Double = 15.0,
     showUserLocation: Boolean = true,
     routePoints: List<GeoPoint>? = null,
+    boundaryOverlays: List<BoundaryOverlay> = emptyList(),
     onMarkerClick: (TapStandWithMeters) -> Unit = {},
     onMapViewReady: (MapView) -> Unit = {},
     onLongPressLocation: ((Double, Double) -> Unit)? = null
@@ -113,6 +116,50 @@ fun OsmMapView(
                 return false
             }
         }).also { mapView.overlays.add(it) }
+    }
+
+    // Boundary overlays – polygons and polylines drawn below everything else
+    val activeBoundaryOverlays = remember { mutableListOf<org.osmdroid.views.overlay.Overlay>() }
+    LaunchedEffect(boundaryOverlays) {
+        activeBoundaryOverlays.forEach { mapView.overlays.remove(it) }
+        activeBoundaryOverlays.clear()
+
+        val density = context.resources.displayMetrics.density
+        for (overlay in boundaryOverlays) {
+            val base = overlay.color
+            val r = (base shr 16) and 0xFF
+            val g = (base shr 8) and 0xFF
+            val b = base and 0xFF
+            val fillColor = (0x30 shl 24) or (r shl 16) or (g shl 8) or b
+            val strokeColor = (0xDD shl 24) or (r shl 16) or (g shl 8) or b
+
+            for (ring in overlay.polygons) {
+                val poly = OsmPolygon().apply {
+                    points = ring.toMutableList()
+                    fillPaint.color = fillColor
+                    fillPaint.style = android.graphics.Paint.Style.FILL
+                    outlinePaint.color = strokeColor
+                    outlinePaint.strokeWidth = 2.5f * density
+                    outlinePaint.style = android.graphics.Paint.Style.STROKE
+                }
+                mapView.overlays.add(0, poly)
+                activeBoundaryOverlays.add(poly)
+            }
+
+            for (line in overlay.polylines) {
+                val polyline = Polyline().apply {
+                    setPoints(line)
+                    outlinePaint.color = strokeColor
+                    outlinePaint.strokeWidth = 3.5f * density
+                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                    outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                    outlinePaint.isAntiAlias = true
+                }
+                mapView.overlays.add(0, polyline)
+                activeBoundaryOverlays.add(polyline)
+            }
+        }
+        mapView.invalidate()
     }
 
     // Route polyline – drawn at index 0 so it sits below markers and user dot
