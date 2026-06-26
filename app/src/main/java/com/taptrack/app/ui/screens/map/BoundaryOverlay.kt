@@ -1,6 +1,6 @@
 package com.taptrack.app.ui.screens.map
 
-import org.osmdroid.util.GeoPoint
+import com.taptrack.app.utils.NamedFeature
 
 data class BoundaryOverlay(
     val id: Long,
@@ -8,6 +8,6 @@ data class BoundaryOverlay(
     val fillColor: Int,
     val borderColor: Int,
     val showLabel: Boolean,
-    val polygons: List<List<GeoPoint>>,
-    val polylines: List<List<GeoPoint>>
+    val polygons: List<NamedFeature>,
+    val polylines: List<NamedFeature>
 )

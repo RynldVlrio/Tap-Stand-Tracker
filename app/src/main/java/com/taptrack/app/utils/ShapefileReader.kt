@@ -5,32 +5,30 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+/** One SHP record = one feature (may have multiple rings/parts). */
+data class ShapeRecord(
+    val shapeType: Int,
+    val parts: List<List<GeoPoint>>
+)
+
 object ShapefileReader {
 
-    data class ShapeGeometry(
-        val polygons: List<List<GeoPoint>>,
-        val polylines: List<List<GeoPoint>>
-    )
-
     /**
-     * Parses an ESRI shapefile (.shp) stream.
-     * Handles types: PolyLine (3), Polygon (5), PolyLineZ (13), PolygonZ (15),
-     * PolyLineM (23), PolygonM (25). Assumes WGS84 coordinates (X=lon, Y=lat).
+     * Parses an ESRI shapefile (.shp) stream and returns one [ShapeRecord] per feature,
+     * preserving the same record order as the companion .dbf attribute table.
      */
-    fun readShp(inputStream: InputStream): ShapeGeometry {
+    fun readShp(inputStream: InputStream): List<ShapeRecord> {
         val bytes = inputStream.readBytes()
-        if (bytes.size < 100) return ShapeGeometry(emptyList(), emptyList())
+        if (bytes.size < 100) return emptyList()
 
         val buf = ByteBuffer.wrap(bytes)
-        val polygons = mutableListOf<List<GeoPoint>>()
-        val polylines = mutableListOf<List<GeoPoint>>()
+        val records = mutableListOf<ShapeRecord>()
 
         buf.position(100) // skip file header
 
         while (buf.remaining() >= 8) {
             buf.order(ByteOrder.BIG_ENDIAN)
-            @Suppress("UNUSED_VARIABLE")
-            val recNum = buf.int
+            @Suppress("UNUSED_VARIABLE") val recNum = buf.int
             val contentLengthBytes = buf.int * 2
 
             if (contentLengthBytes < 4 || buf.remaining() < contentLengthBytes) break
@@ -40,30 +38,24 @@ object ShapefileReader {
             val shapeType = buf.int
 
             try {
-                when (shapeType) {
-                    3, 13, 23 -> { // PolyLine, PolyLineZ, PolyLineM
-                        readPartsAndPoints(buf).forEach { segment ->
-                            if (segment.size >= 2) polylines.add(segment)
-                        }
-                    }
-                    5, 15, 25 -> { // Polygon, PolygonZ, PolygonM
-                        readPartsAndPoints(buf).forEach { ring ->
-                            if (ring.size >= 3) polygons.add(ring)
-                        }
-                    }
-                    // 0 = Null, 1 = Point, etc. — skip
+                val parts: List<List<GeoPoint>> = when (shapeType) {
+                    3, 13, 23 -> readPartsAndPoints(buf) // PolyLine + Z/M variants
+                    5, 15, 25 -> readPartsAndPoints(buf) // Polygon + Z/M variants
+                    else       -> emptyList()
                 }
-            } catch (_: Exception) { }
+                records.add(ShapeRecord(shapeType, parts))
+            } catch (_: Exception) {
+                records.add(ShapeRecord(shapeType, emptyList()))
+            }
 
             buf.position(contentStart + contentLengthBytes)
         }
 
-        return ShapeGeometry(polygons, polylines)
+        return records
     }
 
     private fun readPartsAndPoints(buf: ByteBuffer): List<List<GeoPoint>> {
-        // Skip bounding box (4 doubles = 32 bytes)
-        buf.position(buf.position() + 32)
+        buf.position(buf.position() + 32) // skip bounding box
         val numParts = buf.int
         val numPoints = buf.int
         if (numParts <= 0 || numPoints <= 0 || numParts > numPoints) return emptyList()

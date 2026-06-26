@@ -134,43 +134,54 @@ fun OsmMapView(
 
         val density = context.resources.displayMetrics.density
         for (overlay in boundaryOverlays) {
-            for (ring in overlay.polygons) {
-                val poly = OsmPolygon().apply {
-                    points = ring.toMutableList()
-                    fillPaint.color = overlay.fillColor
-                    fillPaint.style = android.graphics.Paint.Style.FILL
-                    outlinePaint.color = overlay.borderColor
-                    outlinePaint.strokeWidth = 2.5f * density
-                    outlinePaint.style = android.graphics.Paint.Style.STROKE
-                }
-                mapView.overlays.add(0, poly)
-                activeBoundaryOverlays.add(poly)
-            }
-            for (line in overlay.polylines) {
-                val polyline = Polyline().apply {
-                    setPoints(line)
-                    outlinePaint.color = overlay.borderColor
-                    outlinePaint.strokeWidth = 3.5f * density
-                    outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
-                    outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
-                    outlinePaint.isAntiAlias = true
-                }
-                mapView.overlays.add(0, polyline)
-                activeBoundaryOverlays.add(polyline)
-            }
-            // Label marker at polygon/polyline centroid
-            if (overlay.showLabel) {
-                val centroid = computeCentroid(overlay.polygons, overlay.polylines)
-                if (centroid != null) {
-                    val labelIcon = createBoundaryLabelBitmap(context, overlay.name, overlay.borderColor)
-                    val labelMarker = Marker(mapView).apply {
-                        position = centroid
-                        icon = labelIcon
-                        setAnchor(0.5f, 0.5f)
-                        title = overlay.name
+            for (feature in overlay.polygons) {
+                for (ring in feature.rings) {
+                    val poly = OsmPolygon().apply {
+                        points = ring.toMutableList()
+                        fillPaint.color = overlay.fillColor
+                        fillPaint.style = android.graphics.Paint.Style.FILL
+                        outlinePaint.color = overlay.borderColor
+                        outlinePaint.strokeWidth = 2.5f * density
+                        outlinePaint.style = android.graphics.Paint.Style.STROKE
                     }
-                    mapView.overlays.add(labelMarker)
-                    activeBoundaryOverlays.add(labelMarker)
+                    mapView.overlays.add(0, poly)
+                    activeBoundaryOverlays.add(poly)
+                }
+            }
+            for (feature in overlay.polylines) {
+                for (pts in feature.rings) {
+                    val polyline = Polyline().apply {
+                        setPoints(pts)
+                        outlinePaint.color = overlay.borderColor
+                        outlinePaint.strokeWidth = 3.5f * density
+                        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                        outlinePaint.isAntiAlias = true
+                    }
+                    mapView.overlays.add(0, polyline)
+                    activeBoundaryOverlays.add(polyline)
+                }
+            }
+            // One label per named feature at its own centroid
+            if (overlay.showLabel) {
+                for (feature in overlay.polygons) {
+                    val label = feature.name.ifBlank { overlay.name }
+                    val centroid = computeFeatureCentroid(feature.rings) ?: continue
+                    val icon = createBoundaryLabelBitmap(context, label, overlay.borderColor)
+                    val marker = Marker(mapView).apply {
+                        position = centroid; this.icon = icon; title = label; setAnchor(0.5f, 0.5f)
+                    }
+                    mapView.overlays.add(marker); activeBoundaryOverlays.add(marker)
+                }
+                for (feature in overlay.polylines) {
+                    if (feature.name.isBlank()) continue
+                    val label = feature.name
+                    val centroid = computeFeatureCentroid(feature.rings) ?: continue
+                    val icon = createBoundaryLabelBitmap(context, label, overlay.borderColor)
+                    val marker = Marker(mapView).apply {
+                        position = centroid; this.icon = icon; title = label; setAnchor(0.5f, 0.5f)
+                    }
+                    mapView.overlays.add(marker); activeBoundaryOverlays.add(marker)
                 }
             }
         }
@@ -293,8 +304,8 @@ fun OsmMapView(
     )
 }
 
-private fun computeCentroid(polygons: List<List<GeoPoint>>, polylines: List<List<GeoPoint>>): GeoPoint? {
-    val all = (polygons.flatten() + polylines.flatten()).ifEmpty { return null }
+private fun computeFeatureCentroid(rings: List<List<GeoPoint>>): GeoPoint? {
+    val all = rings.flatten().ifEmpty { return null }
     return GeoPoint(all.sumOf { it.latitude } / all.size, all.sumOf { it.longitude } / all.size)
 }
 
