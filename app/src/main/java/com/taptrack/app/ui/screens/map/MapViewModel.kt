@@ -111,6 +111,10 @@ class MapViewModel(
         }
     }
 
+    fun updateLandmark(entity: LandmarkEntity) {
+        viewModelScope.launch { landmarkRepository.update(entity) }
+    }
+
     fun deleteLandmark(id: Long) {
         viewModelScope.launch { landmarkRepository.delete(id) }
     }

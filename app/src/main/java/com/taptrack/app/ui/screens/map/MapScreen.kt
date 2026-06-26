@@ -1,25 +1,31 @@
 package com.taptrack.app.ui.screens.map
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -92,6 +98,11 @@ fun MapScreen(
 
     // Boundary color editor
     var editingBoundary by remember { mutableStateOf<BoundaryEntity?>(null) }
+
+    // Landmark edit dialog
+    var showEditLandmarkDialog by remember { mutableStateOf(false) }
+    var editLandmarkName       by remember { mutableStateOf("") }
+    var editLandmarkDesc       by remember { mutableStateOf("") }
 
     // File picker for boundary import
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -253,16 +264,105 @@ fun MapScreen(
 
     // ── Landmark detail sheet ────────────────────────────────────────────────
     if (selectedLandmark != null) {
+        val lm = selectedLandmark!!
         ModalBottomSheet(
             onDismissRequest = { vm.selectLandmark(null) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
             LandmarkBottomSheet(
-                landmark = selectedLandmark!!,
-                onDelete = { vm.deleteLandmark(selectedLandmark!!.id); vm.selectLandmark(null) },
+                landmark = lm,
+                onEdit = {
+                    editLandmarkName = lm.name
+                    editLandmarkDesc = lm.description
+                    showEditLandmarkDialog = true
+                },
+                onNavigate = {
+                    val label = Uri.encode(lm.name)
+                    val geoUri = Uri.parse("geo:${lm.latitude},${lm.longitude}?q=${lm.latitude},${lm.longitude}($label)")
+                    try { context.startActivity(Intent(Intent.ACTION_VIEW, geoUri)) }
+                    catch (_: Exception) { Toast.makeText(context, "No maps app found", Toast.LENGTH_SHORT).show() }
+                },
+                onShare = {
+                    val text = "${lm.name}\n${lm.latitude}, ${lm.longitude}" +
+                        if (lm.description.isNotBlank()) "\n${lm.description}" else ""
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share landmark"))
+                },
+                onRoute = {
+                    val lmCopy = lm; val mv = mapViewRef
+                    vm.selectLandmark(null); isLoadingRoute = true
+                    coroutineScope.launch {
+                        val loc = context.getLastKnownLocation()
+                        if (loc != null) {
+                            val result = fetchRoute(loc.latitude, loc.longitude, lmCopy.latitude, lmCopy.longitude, context.packageName)
+                            routeResult = result
+                            if (result != null && mv != null) {
+                                val bbox = BoundingBox(
+                                    maxOf(loc.latitude, lmCopy.latitude) + 0.002,
+                                    maxOf(loc.longitude, lmCopy.longitude) + 0.002,
+                                    minOf(loc.latitude, lmCopy.latitude) - 0.002,
+                                    minOf(loc.longitude, lmCopy.longitude) - 0.002
+                                )
+                                mv.post { mv.zoomToBoundingBox(bbox, true, 100) }
+                            }
+                        } else { Toast.makeText(context, "Location unavailable", Toast.LENGTH_SHORT).show() }
+                        isLoadingRoute = false
+                    }
+                },
+                onCopyCoords = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("coordinates", "${lm.latitude}, ${lm.longitude}"))
+                    Toast.makeText(context, "Coordinates copied", Toast.LENGTH_SHORT).show()
+                },
+                onDelete = { vm.deleteLandmark(lm.id); vm.selectLandmark(null) },
                 onDismiss = { vm.selectLandmark(null) }
             )
         }
+    }
+
+    // ── Landmark edit dialog ─────────────────────────────────────────────────
+    if (showEditLandmarkDialog && selectedLandmark != null) {
+        AlertDialog(
+            onDismissRequest = { showEditLandmarkDialog = false },
+            title = { Text("Edit Landmark") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editLandmarkName,
+                        onValueChange = { editLandmarkName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editLandmarkDesc,
+                        onValueChange = { editLandmarkDesc = it },
+                        label = { Text("Description (optional)") },
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (editLandmarkName.isNotBlank()) {
+                            vm.updateLandmark(selectedLandmark!!.copy(
+                                name = editLandmarkName.trim(),
+                                description = editLandmarkDesc.trim()
+                            ))
+                        }
+                        showEditLandmarkDialog = false
+                    },
+                    enabled = editLandmarkName.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditLandmarkDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // ── Tap stand detail sheet ───────────────────────────────────────────────
@@ -331,23 +431,87 @@ fun MapScreen(
 @Composable
 private fun LandmarkBottomSheet(
     landmark: LandmarkEntity,
+    onEdit: () -> Unit,
+    onNavigate: () -> Unit,
+    onShare: () -> Unit,
+    onRoute: () -> Unit,
+    onCopyCoords: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val dateStr = remember(landmark.createdAt) {
+        SimpleDateFormat("MMM d, yyyy  h:mm a", Locale.getDefault()).format(Date(landmark.createdAt))
+    }
+
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Default.Star, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(28.dp))
+        // Header
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(32.dp))
             Column(Modifier.weight(1f)) {
-                Text(landmark.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(formatCoordinates(landmark.latitude, landmark.longitude), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(landmark.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Pinned Landmark", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (landmark.description.isNotBlank()) {
-            Text(landmark.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        HorizontalDivider()
+
+        // Coordinates row with copy button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Coordinates", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "${landmark.latitude}, ${landmark.longitude}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            IconButton(onClick = onCopyCoords, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ContentCopy, contentDescription = "Copy coordinates", modifier = Modifier.size(18.dp))
+            }
         }
+
+        // Description
+        if (landmark.description.isNotBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Default.Notes, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                Text(landmark.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // Created date
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+            Text(dateStr, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        HorizontalDivider()
+
+        // Action buttons row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            ActionIconButton(icon = Icons.Default.Edit,       label = "Edit",     onClick = onEdit,     modifier = Modifier.weight(1f))
+            ActionIconButton(icon = Icons.Default.Navigation, label = "Navigate", onClick = onNavigate, modifier = Modifier.weight(1f))
+            ActionIconButton(icon = Icons.Default.Share,      label = "Share",    onClick = onShare,    modifier = Modifier.weight(1f))
+        }
+
+        // Route on map
+        OutlinedButton(onClick = onRoute, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Directions, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Show Route on Map")
+        }
+
+        // Close / Delete
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Close") }
             Button(
@@ -359,6 +523,25 @@ private fun LandmarkBottomSheet(
                 Spacer(Modifier.width(4.dp))
                 Text("Delete")
             }
+        }
+    }
+}
+
+@Composable
+private fun ActionIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        contentPadding = PaddingValues(vertical = 8.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(18.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
