@@ -6,7 +6,12 @@ import kotlinx.coroutines.flow.Flow
 
 class LandmarkRepository(private val dao: LandmarkDao) {
     fun getAll(): Flow<List<LandmarkEntity>> = dao.getAll()
+    suspend fun getById(id: Long): LandmarkEntity? = dao.getById(id)
     suspend fun insert(landmark: LandmarkEntity): Long = dao.insert(landmark)
     suspend fun update(landmark: LandmarkEntity) = dao.update(landmark)
     suspend fun delete(id: Long) = dao.deleteById(id)
+    suspend fun updateFolder(id: Long, folderId: Long?) {
+        val lm = dao.getById(id) ?: return
+        dao.update(lm.copy(folderId = folderId))
+    }
 }

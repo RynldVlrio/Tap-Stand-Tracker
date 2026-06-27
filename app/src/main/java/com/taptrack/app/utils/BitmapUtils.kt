@@ -79,16 +79,14 @@ fun createLandmarkMarkerBitmap(
     // draw icon symbol
     val r = badgeR * 0.50f
     when (iconType) {
-        "tap_stand"       -> drawIconWaterDrop(canvas, cx, badgeCy, r, whiteFill)
-        "office"          -> drawIconBuilding(canvas, cx, badgeCy, r, whiteFill)
-        "treatment_plant" -> drawIconFunnel(canvas, cx, badgeCy, r, whiteFill)
-        "pump_station"    -> drawIconPump(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
-        "dosing_station"  -> drawIconFlask(canvas, cx, badgeCy, r, whiteFill)
-        "gate_valve"      -> drawIconGateValve(canvas, cx, badgeCy, r, whiteFill)
-        "pressure_valve"  -> drawIconGauge(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
-        "air_valve"       -> drawIconArrowUp(canvas, cx, badgeCy, r, whiteFill)
-        "reservoir"       -> drawIconReservoir(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
-        else              -> drawIconStar(canvas, cx, badgeCy, badgeR, whiteFill)
+        "office"                            -> drawIconBuilding(canvas, cx, badgeCy, r, whiteFill)
+        "filtration", "treatment_plant"     -> drawIconFunnel(canvas, cx, badgeCy, r, whiteFill)
+        "pump", "pump_station"              -> drawIconPump(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
+        "dosing_station"                    -> drawIconFlask(canvas, cx, badgeCy, r, whiteFill)
+        "valve", "gate_valve"               -> drawIconGateValve(canvas, cx, badgeCy, r, whiteFill)
+        "gauge", "pressure_valve"           -> drawIconGauge(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
+        "reservoir"                         -> drawIconReservoir(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
+        else                                -> drawIconStar(canvas, cx, badgeCy, badgeR, whiteFill)
     }
 
     return BitmapDrawable(context.resources, bmp)

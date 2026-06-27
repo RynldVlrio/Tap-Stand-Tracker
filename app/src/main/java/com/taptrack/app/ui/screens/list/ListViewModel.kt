@@ -55,18 +55,33 @@ class ListViewModel(
 
     val landmarks: StateFlow<List<LandmarkEntity>> = combine(
         landmarkRepository.getAll(),
-        _query
-    ) { all, q ->
-        if (q.isBlank()) all
-        else all.filter {
-            it.name.contains(q, ignoreCase = true) ||
-                it.description.contains(q, ignoreCase = true)
-        }
+        _query,
+        _folderFilter
+    ) { all, q, folderId ->
+        all
+            .filter { folderId == null || it.folderId == folderId }
+            .filter { q.isBlank() || it.name.contains(q, ignoreCase = true) || it.description.contains(q, ignoreCase = true) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setQuery(q: String) { _query.value = q }
     fun setStatusFilter(status: String?) { _statusFilter.value = status }
     fun setFolderFilter(id: Long?) { _folderFilter.value = id }
+
+    fun createFolder(name: String) {
+        viewModelScope.launch { repository.saveProject(name.trim(), "") }
+    }
+
+    fun deleteFolder(id: Long) {
+        viewModelScope.launch { repository.deleteProject(id) }
+    }
+
+    fun moveTapStandToFolder(tapStandId: Long, folderId: Long?) {
+        viewModelScope.launch { repository.updateFolder(tapStandId, folderId) }
+    }
+
+    fun moveLandmarkToFolder(landmarkId: Long, folderId: Long?) {
+        viewModelScope.launch { landmarkRepository.updateFolder(landmarkId, folderId) }
+    }
 
     // ── Import / Export ──────────────────────────────────────────────────────
 

@@ -43,6 +43,11 @@ class TapStandRepository(
 
     suspend fun getAllTapStandsOnce(): List<TapStandEntity> = tapStandDao.getAll()
 
+    suspend fun updateFolder(tapStandId: Long, folderId: Long?) {
+        val ts = tapStandDao.getById(tapStandId) ?: return
+        tapStandDao.update(ts.copy(folderId = folderId))
+    }
+
     // ── Project / Folder operations ──────────────────────────────────────────
 
     fun getAllProjects(): Flow<List<ProjectEntity>> = projectDao.getAll()

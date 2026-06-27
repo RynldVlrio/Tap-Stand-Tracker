@@ -12,5 +12,6 @@ data class LandmarkEntity(
     val longitude: Double,
     val color: Int = 0xFFFF9800.toInt(),
     val iconType: String = "landmark",
+    val folderId: Long? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

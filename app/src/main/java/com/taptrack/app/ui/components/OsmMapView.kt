@@ -322,7 +322,8 @@ fun OsmMapView(
         factory = { mapView },
         modifier = modifier,
         update = { view ->
-            view.post { compassOverlay.setCompassCenter(view.width - 80f, 80f) }
+            val dp = view.resources.displayMetrics.density
+            view.post { compassOverlay.setCompassCenter(48f * dp, 92f * dp) }
         }
     )
 }
