@@ -96,10 +96,9 @@ fun MapSearchBar(
         isSearching = false
     }
 
-    // Auto-focus text field when bar expands; guard prevents immediate collapse on focus event
+    // Request focus after expansion; justExpanded is already set synchronously in the click handler
     LaunchedEffect(expanded) {
         if (expanded) {
-            justExpanded = true
             delay(80)
             focusRequester.requestFocus()
             delay(350)
@@ -233,7 +232,7 @@ fun MapSearchBar(
                         color = Color.Black.copy(alpha = 0.28f),
                         shadowElevation = 3.dp,
                         modifier = Modifier.size(46.dp),
-                        onClick = { expanded = true }
+                        onClick = { justExpanded = true; expanded = true }
                     ) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                             Icon(
