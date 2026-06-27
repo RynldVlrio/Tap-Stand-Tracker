@@ -60,13 +60,37 @@ fun MapSearchBar(
     val hasDropdownContent = results.isNotEmpty() || coordTarget != null
     val dropdownVisible = showDropdown && hasDropdownContent
 
+    // Define helpers before LaunchedEffects so lambdas can reference them
+    fun collapse() {
+        query = ""
+        results = emptyList()
+        showDropdown = false
+        focusManager.clearFocus()
+        expanded = false
+    }
+
+    fun selectResult(point: GeoPoint, label: String) {
+        onResultSelected(point, label)
+        collapse()
+    }
+
+    // When a valid coordinate pair is detected, navigate immediately — no tap needed
+    LaunchedEffect(coordTarget) {
+        val target = coordTarget ?: return@LaunchedEffect
+        delay(400) // brief pause so user can finish editing the second number
+        if (parseCoordinates(query) != null) { // still valid after pause
+            selectResult(target, "%.6f, %.6f".format(target.latitude, target.longitude))
+        }
+    }
+
     LaunchedEffect(query) {
         results = emptyList()
+        // Coordinates are handled above; skip geocoding for coordinate input
         if (query.length < 2 || coordTarget != null) {
             isSearching = false
             return@LaunchedEffect
         }
-        delay(450)
+        delay(300) // reduced from 450 ms for faster suggestions
         isSearching = true
         results = geocodeSearch(query, context.packageName)
         isSearching = false
@@ -81,19 +105,6 @@ fun MapSearchBar(
             delay(350)
             justExpanded = false
         }
-    }
-
-    fun collapse() {
-        query = ""
-        results = emptyList()
-        showDropdown = false
-        focusManager.clearFocus()
-        expanded = false
-    }
-
-    fun selectResult(point: GeoPoint, label: String) {
-        onResultSelected(point, label)
-        collapse()
     }
 
     // Outer box always fills the parent width so layout is stable
@@ -184,9 +195,10 @@ fun MapSearchBar(
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         SearchResultRow(
                                             icon = Icons.Default.GpsFixed,
-                                            title = "Go to coordinates",
+                                            title = "Navigating to coordinates…",
                                             subtitle = "%.6f, %.6f".format(point.latitude, point.longitude),
                                             onClick = {
+                                                // Tap to navigate immediately without waiting 400 ms
                                                 selectResult(
                                                     point,
                                                     "%.6f, %.6f".format(point.latitude, point.longitude)

@@ -29,8 +29,11 @@ suspend fun geocodeSearch(query: String, userAgent: String): List<SearchResult> 
     withContext(Dispatchers.IO) {
         runCatching {
             val encoded = URLEncoder.encode(query, "UTF-8")
+            // countrycodes=ph keeps results in the Philippines; addressdetails=1 gives
+            // structured address fields for accurate title/subtitle formatting
             val conn = URL(
-                "https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=5&addressdetails=0"
+                "https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=5" +
+                "&addressdetails=1&countrycodes=ph"
             ).openConnection() as HttpURLConnection
             conn.apply {
                 requestMethod = "GET"
@@ -43,9 +46,33 @@ suspend fun geocodeSearch(query: String, userAgent: String): List<SearchResult> 
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 val display = obj.getString("display_name")
+                val addr = obj.optJSONObject("address")
+
+                // Pick the most specific name available
+                val title = addr?.let { a ->
+                    a.optString("village").takeIf { it.isNotEmpty() }
+                        ?: a.optString("hamlet").takeIf { it.isNotEmpty() }
+                        ?: a.optString("suburb").takeIf { it.isNotEmpty() }
+                        ?: a.optString("neighbourhood").takeIf { it.isNotEmpty() }
+                        ?: a.optString("town").takeIf { it.isNotEmpty() }
+                        ?: a.optString("city").takeIf { it.isNotEmpty() }
+                        ?: a.optString("municipality").takeIf { it.isNotEmpty() }
+                        ?: a.optString("county").takeIf { it.isNotEmpty() }
+                } ?: display.substringBefore(",").trim()
+
+                // Subtitle: municipality/city › province › region (skip parts equal to title)
+                val subtitle = addr?.let { a ->
+                    listOfNotNull(
+                        a.optString("municipality").takeIf { it.isNotEmpty() && it != title },
+                        a.optString("city").takeIf { it.isNotEmpty() && it != title },
+                        a.optString("province").takeIf { it.isNotEmpty() },
+                        a.optString("region").takeIf { it.isNotEmpty() }
+                    ).take(3).joinToString(", ")
+                }.takeIf { !it.isNullOrBlank() } ?: display.substringAfter(",").trim()
+
                 SearchResult(
-                    title = display.substringBefore(",").trim(),
-                    subtitle = display,
+                    title = title,
+                    subtitle = subtitle,
                     lat = obj.getString("lat").toDouble(),
                     lon = obj.getString("lon").toDouble()
                 )
