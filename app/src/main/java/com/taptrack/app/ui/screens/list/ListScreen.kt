@@ -13,12 +13,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
@@ -50,33 +53,37 @@ import java.util.Date
 import java.util.Locale
 
 private val STATUS_FILTERS = listOf<String?>(null, "Active", "Inactive", "Under Repair")
-private val STATUS_LABELS = listOf("All", "Active", "Inactive", "Under Repair")
+private val STATUS_LABELS  = listOf("All", "Active", "Inactive", "Under Repair")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
     val context = LocalContext.current
-    val app = context.applicationContext as TapTrackApplication
+    val app     = context.applicationContext as TapTrackApplication
     val vm: ListViewModel = viewModel(
         factory = ListViewModel.factory(app.repository, app.landmarkRepository)
     )
 
     val tapStands    by vm.tapStands.collectAsStateWithLifecycle()
     val landmarks    by vm.landmarks.collectAsStateWithLifecycle()
+    val allTapStands by vm.allTapStands.collectAsStateWithLifecycle()
+    val allLandmarks by vm.allLandmarks.collectAsStateWithLifecycle()
     val query        by vm.query.collectAsStateWithLifecycle()
     val statusFilter by vm.statusFilter.collectAsStateWithLifecycle()
-    val folderFilter by vm.folderFilter.collectAsStateWithLifecycle()
     val folders      by vm.folders.collectAsStateWithLifecycle()
     val isProcessing by vm.isProcessing.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab           by remember { mutableIntStateOf(0) }
     var showImportExportSheet by remember { mutableStateOf(false) }
-
-    // Folder management state
     var showCreateFolderDialog by remember { mutableStateOf(false) }
-    var deletingFolder by remember { mutableStateOf<ProjectEntity?>(null) }
-    // (itemId, isLandmark) — non-null when folder picker is open
-    var folderPickerItem by remember { mutableStateOf<Pair<Long, Boolean>?>(null) }
+    var deletingFolder         by remember { mutableStateOf<ProjectEntity?>(null) }
+    var folderPickerItem       by remember { mutableStateOf<Pair<Long, Boolean>?>(null) }
+
+    // Folder navigation state — null = folder browser root, non-null = inside a folder
+    var currentFolder by remember { mutableStateOf<ProjectEntity?>(null) }
+
+    // Keep ViewModel filter in sync with navigation state
+    LaunchedEffect(currentFolder) { vm.setFolderFilter(currentFolder?.id) }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { vm.importFile(context.contentResolver, it) }
@@ -101,18 +108,16 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
         }
     }
 
-    // ── Import/export sheet ───────────────────────────────────────────────────
     if (showImportExportSheet) {
         ImportExportSheet(
             isProcessing = isProcessing,
-            onDismiss = { showImportExportSheet = false },
-            onImport = { showImportExportSheet = false; importLauncher.launch(arrayOf("*/*")) },
-            onExportGpx = { showImportExportSheet = false; exportGpxLauncher.launch("taptrack_export.gpx") },
-            onExportKmz = { showImportExportSheet = false; exportKmzLauncher.launch("taptrack_export.kmz") }
+            onDismiss    = { showImportExportSheet = false },
+            onImport     = { showImportExportSheet = false; importLauncher.launch(arrayOf("*/*")) },
+            onExportGpx  = { showImportExportSheet = false; exportGpxLauncher.launch("taptrack_export.gpx") },
+            onExportKmz  = { showImportExportSheet = false; exportKmzLauncher.launch("taptrack_export.kmz") }
         )
     }
 
-    // ── Create folder dialog ──────────────────────────────────────────────────
     if (showCreateFolderDialog) {
         CreateFolderDialog(
             onConfirm = { name -> vm.createFolder(name); showCreateFolderDialog = false },
@@ -120,15 +125,18 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
         )
     }
 
-    // ── Delete folder confirm ─────────────────────────────────────────────────
     deletingFolder?.let { folder ->
         AlertDialog(
             onDismissRequest = { deletingFolder = null },
-            title = { Text("Delete folder \"${folder.name}\"?") },
-            text = { Text("Items assigned to this folder will become unfoldered.") },
+            title   = { Text("Delete folder \"${folder.name}\"?") },
+            text    = { Text("Items assigned to this folder will become unfoldered.") },
             confirmButton = {
                 Button(
-                    onClick = { vm.deleteFolder(folder.id); if (folderFilter == folder.id) vm.setFolderFilter(null); deletingFolder = null },
+                    onClick = {
+                        vm.deleteFolder(folder.id)
+                        if (currentFolder?.id == folder.id) currentFolder = null
+                        deletingFolder = null
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) { Text("Delete") }
             },
@@ -136,41 +144,52 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
         )
     }
 
-    // ── Folder picker sheet ───────────────────────────────────────────────────
     folderPickerItem?.let { (itemId, isLandmark) ->
         val currentFolderId = if (isLandmark)
             landmarks.find { it.id == itemId }?.folderId
+                ?: allLandmarks.find { it.id == itemId }?.folderId
         else
             tapStands.find { it.tapStand.id == itemId }?.tapStand?.folderId
+                ?: allTapStands.find { it.tapStand.id == itemId }?.tapStand?.folderId
 
         FolderPickerSheet(
-            folders = folders,
+            folders         = folders,
             currentFolderId = currentFolderId,
-            onPick = { folderId ->
+            onPick          = { folderId ->
                 if (isLandmark) vm.moveLandmarkToFolder(itemId, folderId)
-                else vm.moveTapStandToFolder(itemId, folderId)
+                else            vm.moveTapStandToFolder(itemId, folderId)
                 folderPickerItem = null
             },
             onCreateNew = { showCreateFolderDialog = true; folderPickerItem = null },
-            onDismiss = { folderPickerItem = null }
+            onDismiss   = { folderPickerItem = null }
         )
     }
 
     // ── Main UI ───────────────────────────────────────────────────────────────
     Column(Modifier.fillMaxSize()) {
+
+        // Folder navigation header — shown when inside a folder
+        if (currentFolder != null) {
+            FolderNavigationHeader(
+                folder   = currentFolder!!,
+                onBack   = { currentFolder = null },
+                onDelete = { deletingFolder = currentFolder }
+            )
+        }
+
         // Search + action row
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
-                value = query,
+                value         = query,
                 onValueChange = vm::setQuery,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text(if (selectedTab == 0) "Search tap stands…" else "Search landmarks…") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                shape = RoundedCornerShape(50)
+                modifier      = Modifier.weight(1f),
+                placeholder   = { Text(if (selectedTab == 0) "Search tap stands…" else "Search landmarks…") },
+                leadingIcon   = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine    = true,
+                shape         = RoundedCornerShape(50)
             )
             if (selectedTab == 0) {
                 IconButton(onClick = { showImportExportSheet = true }) {
@@ -185,179 +204,327 @@ fun ListScreen(onNavigateToDetail: (Long) -> Unit) {
         TabRow(selectedTabIndex = selectedTab) {
             Tab(
                 selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                icon = { Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                text = { Text(if (tapStands.isNotEmpty()) "Tap Stands (${tapStands.size})" else "Tap Stands") }
+                onClick  = { selectedTab = 0 },
+                icon     = { Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                text     = { Text(if (tapStands.isNotEmpty()) "Tap Stands (${tapStands.size})" else "Tap Stands") }
             )
             Tab(
                 selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                icon = { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                text = { Text(if (landmarks.isNotEmpty()) "Landmarks (${landmarks.size})" else "Landmarks") }
+                onClick  = { selectedTab = 1 },
+                icon     = { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                text     = { Text(if (landmarks.isNotEmpty()) "Landmarks (${landmarks.size})" else "Landmarks") }
             )
         }
 
-        // Folder filter row — shared between both tabs
-        FolderFilterRow(
-            folders = folders,
-            selected = folderFilter,
-            onSelect = vm::setFolderFilter,
-            onLongPress = { deletingFolder = it },
-            onCreateNew = { showCreateFolderDialog = true }
-        )
-
-        // Tab content
+        // ── Tab content ───────────────────────────────────────────────────────
         when (selectedTab) {
-            0 -> {
-                // Status filter
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(bottom = 8.dp)
-                ) {
-                    items(STATUS_FILTERS.indices.toList()) { i ->
-                        FilterChip(
-                            selected = statusFilter == STATUS_FILTERS[i],
-                            onClick = { vm.setStatusFilter(STATUS_FILTERS[i]) },
-                            label = { Text(STATUS_LABELS[i]) }
+            0 -> TapStandTabContent(
+                modifier               = Modifier.weight(1f),
+                currentFolder          = currentFolder,
+                folders                = folders,
+                tapStands              = tapStands,
+                allTapStands           = allTapStands,
+                allLandmarks           = allLandmarks,
+                query                  = query,
+                statusFilter           = statusFilter,
+                onSetStatusFilter      = vm::setStatusFilter,
+                onNavigateToDetail     = onNavigateToDetail,
+                onEnterFolder          = { currentFolder = it },
+                onDeleteFolder         = { deletingFolder = it },
+                onFolderPickerOpen     = { folderPickerItem = it to false },
+                onCreateFolder         = { showCreateFolderDialog = true }
+            )
+            1 -> LandmarkTabContent(
+                modifier           = Modifier.weight(1f),
+                currentFolder      = currentFolder,
+                folders            = folders,
+                landmarks          = landmarks,
+                allTapStands       = allTapStands,
+                allLandmarks       = allLandmarks,
+                query              = query,
+                onEnterFolder      = { currentFolder = it },
+                onDeleteFolder     = { deletingFolder = it },
+                onFolderPickerOpen = { folderPickerItem = it to true },
+                onCreateFolder     = { showCreateFolderDialog = true }
+            )
+        }
+    }
+}
+
+// ── Folder navigation header ──────────────────────────────────────────────────
+
+@Composable
+private fun FolderNavigationHeader(
+    folder: ProjectEntity,
+    onBack: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)) {
+        Row(
+            modifier           = Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment  = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to folders")
+            }
+            Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(folder.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete folder", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.75f), modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+// ── Tap Stand tab ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun TapStandTabContent(
+    modifier: Modifier = Modifier,
+    currentFolder: ProjectEntity?,
+    folders: List<ProjectEntity>,
+    tapStands: List<TapStandWithMeters>,
+    allTapStands: List<TapStandWithMeters>,
+    allLandmarks: List<LandmarkEntity>,
+    query: String,
+    statusFilter: String?,
+    onSetStatusFilter: (String?) -> Unit,
+    onNavigateToDetail: (Long) -> Unit,
+    onEnterFolder: (ProjectEntity) -> Unit,
+    onDeleteFolder: (ProjectEntity) -> Unit,
+    onFolderPickerOpen: (Long) -> Unit,
+    onCreateFolder: () -> Unit
+) {
+    val showFolderBrowser = currentFolder == null && query.isBlank() && folders.isNotEmpty()
+
+    Column(modifier = modifier) {
+        if (!showFolderBrowser) {
+            LazyRow(
+                contentPadding        = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier              = Modifier.padding(bottom = 8.dp)
+            ) {
+                items(STATUS_FILTERS.indices.toList()) { i ->
+                    FilterChip(
+                        selected = statusFilter == STATUS_FILTERS[i],
+                        onClick  = { onSetStatusFilter(STATUS_FILTERS[i]) },
+                        label    = { Text(STATUS_LABELS[i]) }
+                    )
+                }
+            }
+        }
+
+        if (showFolderBrowser) {
+            val unfolderedItems = tapStands.filter { it.tapStand.folderId == null }
+            LazyColumn(
+                contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier            = Modifier.fillMaxSize()
+            ) {
+                items(folders) { folder ->
+                    FolderNavCard(
+                        folder        = folder,
+                        tapStandCount = allTapStands.count { it.tapStand.folderId == folder.id },
+                        landmarkCount = allLandmarks.count { it.folderId == folder.id },
+                        onClick       = { onEnterFolder(folder) },
+                        onDelete      = { onDeleteFolder(folder) }
+                    )
+                }
+                item { NewFolderRow(onCreateFolder) }
+                if (unfolderedItems.isNotEmpty()) {
+                    item { SectionLabel("Unfoldered") }
+                    items(unfolderedItems, key = { it.tapStand.id }) { item ->
+                        TapStandListItem(
+                            item          = item,
+                            folder        = null,
+                            onClick       = { onNavigateToDetail(item.tapStand.id) },
+                            onFolderClick = { onFolderPickerOpen(item.tapStand.id) }
                         )
                     }
                 }
-
-                if (tapStands.isEmpty()) {
-                    TapStandEmptyState(Modifier.weight(1f))
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(tapStands, key = { it.tapStand.id }) { item ->
-                            TapStandListItem(
-                                item = item,
-                                folder = folders.find { it.id == item.tapStand.folderId },
-                                onClick = { onNavigateToDetail(item.tapStand.id) },
-                                onFolderClick = { folderPickerItem = item.tapStand.id to false }
-                            )
-                        }
-                    }
-                }
             }
-
-            1 -> {
-                if (landmarks.isEmpty()) {
-                    LandmarkEmptyState(Modifier.weight(1f))
-                } else {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(landmarks, key = { it.id }) { landmark ->
-                            LandmarkListItem(
-                                landmark = landmark,
-                                folder = folders.find { it.id == landmark.folderId },
-                                onFolderClick = { folderPickerItem = landmark.id to true }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Folder filter row ─────────────────────────────────────────────────────────
-
-@Composable
-private fun FolderFilterRow(
-    folders: List<ProjectEntity>,
-    selected: Long?,
-    onSelect: (Long?) -> Unit,
-    onLongPress: (ProjectEntity) -> Unit,
-    onCreateNew: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        LazyRow(
-            contentPadding = PaddingValues(start = 16.dp, end = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f)
-        ) {
-            if (folders.isNotEmpty()) {
-                item {
-                    FilterChip(
-                        selected = selected == null,
-                        onClick = { onSelect(null) },
-                        label = { Text("All Folders") },
-                        leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    )
-                }
-                items(folders) { folder ->
-                    FolderChip(
-                        folder = folder,
-                        isSelected = selected == folder.id,
-                        onClick = { onSelect(folder.id) },
-                        onLongPress = { onLongPress(folder) }
-                    )
-                }
-            }
-        }
-
-        // "New folder" icon button always visible
-        IconButton(
-            onClick = onCreateNew,
-            modifier = Modifier.padding(end = 4.dp)
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "New folder",
-                tint = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FolderChip(
-    folder: ProjectEntity,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    onLongPress: () -> Unit
-) {
-    var showDeleteMenu by remember { mutableStateOf(false) }
-    Box {
-        FilterChip(
-            selected = isSelected,
-            onClick = onClick,
-            label = { Text(folder.name) },
-            leadingIcon = {
-                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp))
-            },
-            trailingIcon = if (isSelected) ({
-                IconButton(
-                    onClick = { showDeleteMenu = true },
-                    modifier = Modifier.size(18.dp)
+        } else {
+            if (tapStands.isEmpty()) {
+                TapStandEmptyState(Modifier.weight(1f))
+            } else {
+                LazyColumn(
+                    contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier            = Modifier.fillMaxSize()
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete folder", modifier = Modifier.size(14.dp))
+                    items(tapStands, key = { it.tapStand.id }) { item ->
+                        TapStandListItem(
+                            item          = item,
+                            folder        = folders.find { it.id == item.tapStand.folderId },
+                            onClick       = { onNavigateToDetail(item.tapStand.id) },
+                            onFolderClick = { onFolderPickerOpen(item.tapStand.id) }
+                        )
+                    }
                 }
-            }) else null
-        )
-        DropdownMenu(expanded = showDeleteMenu, onDismissRequest = { showDeleteMenu = false }) {
-            DropdownMenuItem(
-                text = { Text("Delete folder", color = MaterialTheme.colorScheme.error) },
-                leadingIcon = {
-                    Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                },
-                onClick = { showDeleteMenu = false; onLongPress() }
-            )
+            }
         }
     }
+}
+
+// ── Landmark tab ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun LandmarkTabContent(
+    modifier: Modifier = Modifier,
+    currentFolder: ProjectEntity?,
+    folders: List<ProjectEntity>,
+    landmarks: List<LandmarkEntity>,
+    allTapStands: List<TapStandWithMeters>,
+    allLandmarks: List<LandmarkEntity>,
+    query: String,
+    onEnterFolder: (ProjectEntity) -> Unit,
+    onDeleteFolder: (ProjectEntity) -> Unit,
+    onFolderPickerOpen: (Long) -> Unit,
+    onCreateFolder: () -> Unit
+) {
+    val showFolderBrowser = currentFolder == null && query.isBlank() && folders.isNotEmpty()
+
+    Column(modifier = modifier) {
+        if (showFolderBrowser) {
+            val unfolderedItems = landmarks.filter { it.folderId == null }
+            LazyColumn(
+                contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier            = Modifier.fillMaxSize()
+            ) {
+                items(folders) { folder ->
+                    FolderNavCard(
+                        folder        = folder,
+                        tapStandCount = allTapStands.count { it.tapStand.folderId == folder.id },
+                        landmarkCount = allLandmarks.count { it.folderId == folder.id },
+                        onClick       = { onEnterFolder(folder) },
+                        onDelete      = { onDeleteFolder(folder) }
+                    )
+                }
+                item { NewFolderRow(onCreateFolder) }
+                if (unfolderedItems.isNotEmpty()) {
+                    item { SectionLabel("Unfoldered") }
+                    items(unfolderedItems, key = { it.id }) { landmark ->
+                        LandmarkListItem(
+                            landmark      = landmark,
+                            folder        = null,
+                            onFolderClick = { onFolderPickerOpen(landmark.id) }
+                        )
+                    }
+                }
+            }
+        } else {
+            if (landmarks.isEmpty()) {
+                LandmarkEmptyState(Modifier.weight(1f))
+            } else {
+                LazyColumn(
+                    contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier            = Modifier.fillMaxSize()
+                ) {
+                    items(landmarks, key = { it.id }) { landmark ->
+                        LandmarkListItem(
+                            landmark      = landmark,
+                            folder        = folders.find { it.id == landmark.folderId },
+                            onFolderClick = { onFolderPickerOpen(landmark.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Folder nav card ───────────────────────────────────────────────────────────
+
+@Composable
+private fun FolderNavCard(
+    folder: ProjectEntity,
+    tapStandCount: Int,
+    landmarkCount: Int,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    Card(
+        modifier  = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape     = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(44.dp),
+                shape    = RoundedCornerShape(10.dp),
+                color    = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(folder.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                val countText = buildList {
+                    if (tapStandCount > 0) add("$tapStandCount tap stand${if (tapStandCount != 1) "s" else ""}")
+                    if (landmarkCount > 0) add("$landmarkCount landmark${if (landmarkCount != 1) "s" else ""}")
+                }.joinToString(" · ")
+                Text(
+                    text  = countText.ifEmpty { "Empty" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text         = { Text("Delete folder", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon  = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        onClick      = { showMenu = false; onDelete() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── New-folder row ────────────────────────────────────────────────────────────
+
+@Composable
+private fun NewFolderRow(onClick: () -> Unit) {
+    OutlinedCard(
+        modifier  = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape     = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier              = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text("New Folder", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+// ── Section label ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text     = text.uppercase(),
+        style    = MaterialTheme.typography.labelSmall,
+        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+    )
 }
 
 // ── Folder picker sheet ───────────────────────────────────────────────────────
@@ -373,66 +540,31 @@ private fun FolderPickerSheet(
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        sheetState       = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 32.dp)
         ) {
-            Text(
-                "Move to Folder",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            // "No folder" option
+            Text("Move to Folder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
             ListItem(
                 headlineContent = { Text("No folder") },
-                leadingContent = {
-                    Icon(
-                        Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                trailingContent = {
-                    if (currentFolderId == null) RadioButton(selected = true, onClick = null)
-                },
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onPick(null) }
+                leadingContent  = { Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailingContent = { if (currentFolderId == null) RadioButton(selected = true, onClick = null) },
+                modifier        = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onPick(null) }
             )
-
             if (folders.isNotEmpty()) {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 folders.forEach { folder ->
                     ListItem(
                         headlineContent = { Text(folder.name) },
-                        leadingContent = {
-                            Icon(
-                                Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        },
-                        trailingContent = {
-                            if (currentFolderId == folder.id) RadioButton(selected = true, onClick = null)
-                        },
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onPick(folder.id) }
+                        leadingContent  = { Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { if (currentFolderId == folder.id) RadioButton(selected = true, onClick = null) },
+                        modifier        = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onPick(folder.id) }
                     )
                 }
             }
-
             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-            OutlinedButton(
-                onClick = onCreateNew,
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            OutlinedButton(onClick = onCreateNew, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Create New Folder")
@@ -448,23 +580,20 @@ private fun CreateFolderDialog(onConfirm: (String) -> Unit, onDismiss: () -> Uni
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Folder") },
-        text = {
+        title   = { Text("New Folder") },
+        text    = {
             OutlinedTextField(
-                value = name,
+                value         = name,
                 onValueChange = { name = it },
-                label = { Text("Folder name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                label         = { Text("Folder name") },
+                singleLine    = true,
+                modifier      = Modifier.fillMaxWidth()
             )
         },
-        confirmButton = {
-            Button(
-                onClick = { if (name.isNotBlank()) onConfirm(name) },
-                enabled = name.isNotBlank()
-            ) { Text("Create") }
+        confirmButton  = {
+            Button(onClick = { if (name.isNotBlank()) onConfirm(name) }, enabled = name.isNotBlank()) { Text("Create") }
         },
-        dismissButton = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton  = { OutlinedButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
 
@@ -478,26 +607,28 @@ private fun TapStandListItem(
     onFolderClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        modifier  = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape     = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier              = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment     = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             val photoFile = File(item.tapStand.photoPath)
             if (item.tapStand.photoPath.isNotEmpty() && photoFile.exists()) {
                 AsyncImage(
-                    model = photoFile, contentDescription = null,
-                    modifier = Modifier.size(72.dp).clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Crop
+                    model           = photoFile,
+                    contentDescription = null,
+                    modifier        = Modifier.size(72.dp).clip(RoundedCornerShape(8.dp)),
+                    contentScale    = ContentScale.Crop
                 )
             } else {
                 Surface(
-                    modifier = Modifier.size(72.dp), shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
+                    modifier = Modifier.size(72.dp),
+                    shape    = RoundedCornerShape(8.dp),
+                    color    = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -509,7 +640,7 @@ private fun TapStandListItem(
                 Text(item.tapStand.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 if (item.tapStand.locationDescription.isNotEmpty()) {
                     Text(
-                        text = item.tapStand.locationDescription,
+                        text  = item.tapStand.locationDescription,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -521,21 +652,20 @@ private fun TapStandListItem(
                     Text("${item.meters.size} meter(s)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(Modifier.height(2.dp))
-                // Folder badge — always shown and tappable
                 TextButton(
-                    onClick = onFolderClick,
-                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-                    modifier = Modifier.height(24.dp)
+                    onClick         = onFolderClick,
+                    contentPadding  = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                    modifier        = Modifier.height(24.dp)
                 ) {
                     Icon(
                         if (folder != null) Icons.Default.Folder else Icons.Default.FolderOpen,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
-                        tint = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        tint     = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                     )
                     Spacer(Modifier.width(3.dp))
                     Text(
-                        text = folder?.name ?: "Assign folder",
+                        text  = folder?.name ?: "Assign folder",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                     )
@@ -558,18 +688,19 @@ private fun LandmarkListItem(
     val iconDef = remember(landmark.iconType) { LandmarkIcons.fromKey(landmark.iconType) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        modifier  = Modifier.fillMaxWidth(),
+        shape     = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.Top,
+            modifier              = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment     = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Surface(
-                modifier = Modifier.size(48.dp), shape = RoundedCornerShape(8.dp),
-                color = Color(landmark.color).copy(alpha = 0.12f)
+                modifier = Modifier.size(48.dp),
+                shape    = RoundedCornerShape(8.dp),
+                color    = Color(landmark.color).copy(alpha = 0.12f)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(iconDef.icon, contentDescription = null, tint = Color(landmark.color), modifier = Modifier.size(26.dp))
@@ -590,21 +721,20 @@ private fun LandmarkListItem(
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(dateStr, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                    // Folder badge
                     TextButton(
-                        onClick = onFolderClick,
+                        onClick        = onFolderClick,
                         contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-                        modifier = Modifier.height(24.dp)
+                        modifier       = Modifier.height(24.dp)
                     ) {
                         Icon(
                             if (folder != null) Icons.Default.Folder else Icons.Default.FolderOpen,
                             contentDescription = null,
                             modifier = Modifier.size(14.dp),
-                            tint = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            tint     = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                         )
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            text = folder?.name ?: "Assign folder",
+                            text  = folder?.name ?: "Assign folder",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (folder != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                         )
@@ -614,8 +744,8 @@ private fun LandmarkListItem(
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 IconButton(
-                    onClick = {
-                        val label = Uri.encode(landmark.name)
+                    onClick  = {
+                        val label  = Uri.encode(landmark.name)
                         val geoUri = Uri.parse("geo:${landmark.latitude},${landmark.longitude}?q=${landmark.latitude},${landmark.longitude}($label)")
                         try { context.startActivity(Intent(Intent.ACTION_VIEW, geoUri)) }
                         catch (_: Exception) { Toast.makeText(context, "No maps app found", Toast.LENGTH_SHORT).show() }
@@ -625,7 +755,7 @@ private fun LandmarkListItem(
                     Icon(Icons.Default.Navigation, contentDescription = "Navigate", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
                 IconButton(
-                    onClick = {
+                    onClick  = {
                         val text = "${landmark.name}\n${landmark.latitude}, ${landmark.longitude}" +
                             if (landmark.description.isNotBlank()) "\n${landmark.description}" else ""
                         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }, "Share landmark"))
@@ -688,24 +818,24 @@ private fun ImportExportSheet(
             } else {
                 Text("IMPORT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
                 ListItem(
-                    headlineContent = { Text("Import GPX / KML / KMZ") },
+                    headlineContent  = { Text("Import GPX / KML / KMZ") },
                     supportingContent = { Text("Add tap stands from a file saved by Google Earth, OsmAnd+, or any GPX/KML app") },
-                    leadingContent = { Icon(Icons.Default.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onImport)
+                    leadingContent   = { Icon(Icons.Default.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    modifier         = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onImport)
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text("EXPORT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 4.dp))
                 ListItem(
-                    headlineContent = { Text("Export as GPX") },
+                    headlineContent  = { Text("Export as GPX") },
                     supportingContent = { Text("Save all tap stands as GPX waypoints (compatible with OsmAnd+, GPS apps)") },
-                    leadingContent = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onExportGpx)
+                    leadingContent   = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
+                    modifier         = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onExportGpx)
                 )
                 ListItem(
-                    headlineContent = { Text("Export as KMZ") },
+                    headlineContent  = { Text("Export as KMZ") },
                     supportingContent = { Text("Save all tap stands as KMZ (compatible with Google Earth)") },
-                    leadingContent = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onExportKmz)
+                    leadingContent   = { Icon(Icons.Default.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.secondary) },
+                    modifier         = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onExportKmz)
                 )
             }
         }

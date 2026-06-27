@@ -159,14 +159,15 @@ private fun drawIconWTP(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Pa
 }
 
 private fun drawIconPump(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Paint, stroke: Paint) {
-    // Centrifugal pump: outer casing ring, impeller ring, shaft hub, discharge pipe at top
-    val pumpCy = cy + r * 0.15f
-    val outerR = r * 0.68f
-    canvas.drawCircle(cx, pumpCy, outerR, stroke)
-    canvas.drawCircle(cx, pumpCy, outerR * 0.46f, stroke)
-    canvas.drawCircle(cx, pumpCy, outerR * 0.14f, fill)
-    val pw = r * 0.22f
-    canvas.drawRect(cx - pw / 2f, cy - r * 0.98f, cx + pw / 2f, pumpCy - outerR + 1f, fill)
+    // Circle casing + right-pointing triangle (play-button / pump symbol)
+    canvas.drawCircle(cx, cy, r * 0.86f, stroke)
+    val triR = r * 0.52f
+    canvas.drawPath(Path().apply {
+        moveTo(cx - triR * 0.50f, cy - triR * 0.87f)
+        lineTo(cx + triR, cy)
+        lineTo(cx - triR * 0.50f, cy + triR * 0.87f)
+        close()
+    }, fill)
 }
 
 private fun drawIconFlask(canvas: Canvas, cx: Float, cy: Float, r: Float, paint: Paint) {

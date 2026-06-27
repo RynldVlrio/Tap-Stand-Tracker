@@ -42,6 +42,7 @@ import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon as OsmPolygon
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
@@ -92,6 +93,14 @@ fun OsmMapView(
             setPersonIcon(dot)
             setPersonAnchor(.5f, .5f)
             mapView.overlays.add(0, this)
+        }
+    }
+
+    // Two-finger rotation support
+    remember {
+        RotationGestureOverlay(mapView).apply {
+            isEnabled = true
+            mapView.overlays.add(this)
         }
     }
 

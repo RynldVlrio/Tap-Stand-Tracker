@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -232,6 +234,7 @@ fun MapScreen(
         // Compass — top-left, aligned with search bar height
         MapCompass(
             azimuth = compassAzimuth,
+            onResetNorth = { mapViewRef?.let { it.mapOrientation = 0f; it.invalidate() } },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
@@ -521,20 +524,23 @@ fun MapScreen(
 }
 
 @Composable
-private fun MapCompass(azimuth: Float, modifier: Modifier = Modifier) {
+private fun MapCompass(azimuth: Float, onResetNorth: () -> Unit = {}, modifier: Modifier = Modifier) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(44.dp)
             .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
             .background(Color.White, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onResetNorth)
     ) {
-        Canvas(modifier = Modifier.size(28.dp)) {
-            rotate(-azimuth, pivot = center) {
-                val cx = center.x
-                val cy = center.y
-                val h = size.height
-                val w = size.width
+        // Needle + "N" label rotate as a single unit
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(28.dp).rotate(-azimuth)
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = center.x; val cy = center.y; val h = size.height; val w = size.width
 
                 // North arrow — red
                 val northPath = Path().apply {
@@ -560,6 +566,13 @@ private fun MapCompass(azimuth: Float, modifier: Modifier = Modifier) {
                 drawCircle(color = Color.White, radius = w * 0.11f, center = center)
                 drawCircle(color = Color(0xFF424242), radius = w * 0.07f, center = center)
             }
+            // "N" label pinned to north arrow tip
+            Text(
+                text     = "N",
+                color    = Color.White,
+                style    = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 1.dp)
+            )
         }
     }
 }

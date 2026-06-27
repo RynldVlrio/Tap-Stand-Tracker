@@ -36,6 +36,12 @@ class ListViewModel(
     val folders: StateFlow<List<ProjectEntity>> = repository.getAllProjects()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val allTapStands: StateFlow<List<TapStandWithMeters>> = repository.getAllWithMeters()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val allLandmarks: StateFlow<List<LandmarkEntity>> = landmarkRepository.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val tapStands: StateFlow<List<TapStandWithMeters>> = combine(
         repository.getAllWithMeters(),

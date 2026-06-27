@@ -19,8 +19,8 @@ android {
         applicationId = "com.taptrack.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 26
-        versionName = "5.1"
+        versionCode = 27
+        versionName = "5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GITHUB_TOKEN", "\"${localProps.getProperty("github.token", "")}\"")
 
