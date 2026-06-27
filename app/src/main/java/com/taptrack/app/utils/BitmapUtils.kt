@@ -80,10 +80,10 @@ fun createLandmarkMarkerBitmap(
     val r = badgeR * 0.50f
     when (iconType) {
         "office"                            -> drawIconBuilding(canvas, cx, badgeCy, r, whiteFill)
-        "filtration", "treatment_plant"     -> drawIconFunnel(canvas, cx, badgeCy, r, whiteFill)
+        "filtration", "treatment_plant"     -> drawIconWTP(canvas, cx, badgeCy, r, whiteFill)
         "pump", "pump_station"              -> drawIconPump(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
         "dosing_station"                    -> drawIconFlask(canvas, cx, badgeCy, r, whiteFill)
-        "valve", "gate_valve"               -> drawIconGateValve(canvas, cx, badgeCy, r, whiteFill)
+        "valve", "gate_valve"               -> drawIconGateValve(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
         "gauge", "pressure_valve"           -> drawIconGauge(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
         "reservoir"                         -> drawIconReservoir(canvas, cx, badgeCy, r, whiteFill, whiteStroke)
         else                                -> drawIconStar(canvas, cx, badgeCy, badgeR, whiteFill)
@@ -141,30 +141,32 @@ private fun drawIconBuilding(canvas: Canvas, cx: Float, cy: Float, r: Float, pai
     canvas.drawRect(left, roofBot, right, bot, paint)
 }
 
-private fun drawIconFunnel(canvas: Canvas, cx: Float, cy: Float, r: Float, paint: Paint) {
-    val top = cy - r * 0.70f
-    val stemW = r * 0.26f
-    val waistY = cy + r * 0.08f
-    val stemBot = cy + r * 0.72f
+private fun drawIconWTP(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Paint) {
+    // Water Treatment Plant: cylindrical tank (left) + building with peaked roof (right)
+    val tankCx = cx - r * 0.42f
+    val tankR = r * 0.34f
+    val tankTop = cy - r * 0.60f
+    val tankBot = cy + r * 0.56f
+    canvas.drawRect(tankCx - tankR, tankTop, tankCx + tankR, tankBot, fill)
+    canvas.drawOval(RectF(tankCx - tankR, tankTop - tankR * 0.45f, tankCx + tankR, tankTop + tankR * 0.45f), fill)
+    canvas.drawOval(RectF(tankCx - tankR, tankBot - tankR * 0.45f, tankCx + tankR, tankBot + tankR * 0.45f), fill)
+    val bL = cx + r * 0.06f; val bR = cx + r * 0.88f
+    val bT = cy - r * 0.50f; val bB = cy + r * 0.56f
+    canvas.drawRect(bL, bT, bR, bB, fill)
     canvas.drawPath(Path().apply {
-        moveTo(cx - r, top)
-        lineTo(cx + r, top)
-        lineTo(cx + stemW, waistY)
-        lineTo(cx + stemW, stemBot)
-        lineTo(cx - stemW, stemBot)
-        lineTo(cx - stemW, waistY)
-        close()
-    }, paint)
+        moveTo((bL + bR) / 2f, cy - r * 0.84f); lineTo(bL, bT); lineTo(bR, bT); close()
+    }, fill)
 }
 
 private fun drawIconPump(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Paint, stroke: Paint) {
-    // Impeller: center hub + 3 blades at 120°
-    canvas.drawCircle(cx, cy, r * 0.24f, fill)
-    val bladeLen = r * 0.84f
-    for (i in 0 until 3) {
-        val angle = (-PI / 2 + i * 2.0 * PI / 3).toFloat()
-        canvas.drawLine(cx, cy, cx + bladeLen * cos(angle), cy + bladeLen * sin(angle), stroke)
-    }
+    // Centrifugal pump: outer casing ring, impeller ring, shaft hub, discharge pipe at top
+    val pumpCy = cy + r * 0.15f
+    val outerR = r * 0.68f
+    canvas.drawCircle(cx, pumpCy, outerR, stroke)
+    canvas.drawCircle(cx, pumpCy, outerR * 0.46f, stroke)
+    canvas.drawCircle(cx, pumpCy, outerR * 0.14f, fill)
+    val pw = r * 0.22f
+    canvas.drawRect(cx - pw / 2f, cy - r * 0.98f, cx + pw / 2f, pumpCy - outerR + 1f, fill)
 }
 
 private fun drawIconFlask(canvas: Canvas, cx: Float, cy: Float, r: Float, paint: Paint) {
@@ -189,20 +191,18 @@ private fun drawIconFlask(canvas: Canvas, cx: Float, cy: Float, r: Float, paint:
     }, paint)
 }
 
-private fun drawIconGateValve(canvas: Canvas, cx: Float, cy: Float, r: Float, paint: Paint) {
-    // Bowtie (standard gate valve symbol): two triangles, tips meeting at center
+private fun drawIconGateValve(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Paint, stroke: Paint) {
+    // Gate valve: bowtie body + stem + handwheel circle at top
+    val vCy = cy + r * 0.16f
     canvas.drawPath(Path().apply {
-        moveTo(cx, cy)
-        lineTo(cx - r, cy - r * 0.70f)
-        lineTo(cx - r, cy + r * 0.70f)
-        close()
-    }, paint)
+        moveTo(cx, vCy); lineTo(cx - r, vCy - r * 0.65f); lineTo(cx - r, vCy + r * 0.65f); close()
+    }, fill)
     canvas.drawPath(Path().apply {
-        moveTo(cx, cy)
-        lineTo(cx + r, cy - r * 0.70f)
-        lineTo(cx + r, cy + r * 0.70f)
-        close()
-    }, paint)
+        moveTo(cx, vCy); lineTo(cx + r, vCy - r * 0.65f); lineTo(cx + r, vCy + r * 0.65f); close()
+    }, fill)
+    val stemW = r * 0.12f
+    canvas.drawRect(cx - stemW, vCy - r * 0.65f, cx + stemW, cy - r * 0.40f, fill)
+    canvas.drawCircle(cx, cy - r * 0.70f, r * 0.26f, stroke)
 }
 
 private fun drawIconGauge(canvas: Canvas, cx: Float, cy: Float, r: Float, fill: Paint, stroke: Paint) {

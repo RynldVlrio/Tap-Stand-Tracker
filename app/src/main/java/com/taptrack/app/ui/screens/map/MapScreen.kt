@@ -4,10 +4,16 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,7 +24,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +97,27 @@ fun MapScreen(
     var routeResult         by remember { mutableStateOf<RouteResult?>(null) }
     var isLoadingRoute      by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+
+    // Compass heading from rotation-vector sensor
+    var compassAzimuth by remember { mutableFloatStateOf(0f) }
+    DisposableEffect(Unit) {
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        val rotMatrix = FloatArray(9)
+        val orientation = FloatArray(3)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                if (e.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    SensorManager.getRotationMatrixFromVector(rotMatrix, e.values)
+                    SensorManager.getOrientation(rotMatrix, orientation)
+                    compassAzimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+        sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        onDispose { sm.unregisterListener(listener) }
+    }
 
     // Long-press / search-pin state
     var longPressLat      by remember { mutableDoubleStateOf(0.0) }
@@ -198,6 +228,18 @@ fun MapScreen(
         if (isLoadingRoute) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
         }
+
+        // Compass — top-left, aligned with search bar height
+        MapCompass(
+            azimuth = compassAzimuth,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(
+                    start = 12.dp,
+                    top = if (routeResult != null) 52.dp else 8.dp
+                )
+        )
 
         Column(
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
@@ -475,6 +517,50 @@ fun MapScreen(
 
     if (showDownloadDialog) {
         mapViewRef?.let { MapDownloadDialog(mapView = it, onDismiss = { showDownloadDialog = false }) }
+    }
+}
+
+@Composable
+private fun MapCompass(azimuth: Float, modifier: Modifier = Modifier) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(44.dp)
+            .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+            .background(Color.White, CircleShape)
+    ) {
+        Canvas(modifier = Modifier.size(28.dp)) {
+            rotate(-azimuth, pivot = center) {
+                val cx = center.x
+                val cy = center.y
+                val h = size.height
+                val w = size.width
+
+                // North arrow — red
+                val northPath = Path().apply {
+                    moveTo(cx, cy - h * 0.47f)
+                    lineTo(cx - w * 0.13f, cy + h * 0.05f)
+                    lineTo(cx, cy + h * 0.14f)
+                    lineTo(cx + w * 0.13f, cy + h * 0.05f)
+                    close()
+                }
+                drawPath(northPath, color = Color(0xFFD32F2F))
+
+                // South arrow — light gray
+                val southPath = Path().apply {
+                    moveTo(cx, cy + h * 0.47f)
+                    lineTo(cx - w * 0.13f, cy - h * 0.05f)
+                    lineTo(cx, cy - h * 0.14f)
+                    lineTo(cx + w * 0.13f, cy - h * 0.05f)
+                    close()
+                }
+                drawPath(southPath, color = Color(0xFFBDBDBD))
+
+                // Center pivot dot
+                drawCircle(color = Color.White, radius = w * 0.11f, center = center)
+                drawCircle(color = Color(0xFF424242), radius = w * 0.07f, center = center)
+            }
+        }
     }
 }
 

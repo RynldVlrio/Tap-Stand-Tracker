@@ -42,8 +42,6 @@ import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon as OsmPolygon
 import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.compass.CompassOverlay
-import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
@@ -97,13 +95,6 @@ fun OsmMapView(
         }
     }
 
-    val compassOverlay = remember {
-        CompassOverlay(context, InternalCompassOrientationProvider(context), mapView).apply {
-            enableCompass()
-            mapView.overlays.add(this)
-        }
-    }
-
     val onLongPressRef = rememberUpdatedState(onLongPress)
 
     remember {
@@ -120,7 +111,6 @@ fun OsmMapView(
                     val dy = (userPx.y - pressPx.y).toFloat()
                     kotlin.math.sqrt((dx * dx + dy * dy).toDouble()) <= 80.0
                 } else false
-                // Use precise GPS coords for tap stand accuracy; pressed coords for landmarks
                 val finalLat = if (nearUser && userLoc != null) userLoc.latitude else p.latitude
                 val finalLng = if (nearUser && userLoc != null) userLoc.longitude else p.longitude
                 handler(finalLat, finalLng, nearUser)
@@ -165,7 +155,6 @@ fun OsmMapView(
                     activeBoundaryOverlays.add(polyline)
                 }
             }
-            // One label per named feature at its own centroid
             if (overlay.showLabel) {
                 for (feature in overlay.polygons) {
                     val label = feature.name.ifBlank { overlay.name }
@@ -219,12 +208,10 @@ fun OsmMapView(
                 Lifecycle.Event.ON_RESUME -> {
                     mapView.onResume()
                     myLocationOverlay.enableMyLocation()
-                    compassOverlay.enableCompass()
                 }
                 Lifecycle.Event.ON_PAUSE -> {
                     mapView.onPause()
                     myLocationOverlay.disableMyLocation()
-                    compassOverlay.disableCompass()
                 }
                 else -> {}
             }
@@ -233,7 +220,6 @@ fun OsmMapView(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             myLocationOverlay.disableMyLocation()
-            compassOverlay.disableCompass()
             mapView.onDetach()
         }
     }
@@ -320,11 +306,7 @@ fun OsmMapView(
 
     AndroidView(
         factory = { mapView },
-        modifier = modifier,
-        update = { view ->
-            val dp = view.resources.displayMetrics.density
-            view.post { compassOverlay.setCompassCenter(48f * dp, 92f * dp) }
-        }
+        modifier = modifier
     )
 }
 
