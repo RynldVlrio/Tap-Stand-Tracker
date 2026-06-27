@@ -303,7 +303,7 @@ fun OsmMapView(
         landmarkMarkers.forEach { mapView.overlays.remove(it) }
         landmarkMarkers.clear()
         landmarks.forEach { lm ->
-            val icon = createLandmarkMarkerBitmap(context, lm.color)
+            val icon = createLandmarkMarkerBitmap(context, lm.color, lm.iconType)
             val marker = Marker(mapView).apply {
                 position = GeoPoint(lm.latitude, lm.longitude)
                 title = lm.name

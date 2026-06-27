@@ -102,10 +102,9 @@ fun MapScreen(
     // Boundary color editor
     var editingBoundary by remember { mutableStateOf<BoundaryEntity?>(null) }
 
-    // Landmark edit dialog
-    var showEditLandmarkDialog by remember { mutableStateOf(false) }
-    var editLandmarkName       by remember { mutableStateOf("") }
-    var editLandmarkDesc       by remember { mutableStateOf("") }
+    // Landmark edit sheet
+    var showEditLandmarkSheet by remember { mutableStateOf(false) }
+    var editingLandmark       by remember { mutableStateOf<LandmarkEntity?>(null) }
 
     // File picker for boundary import
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -193,7 +192,11 @@ fun MapScreen(
                     }
                 }
             }
-            if (isLoadingRoute) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        // Route-loading bar pinned to the very top edge of the screen
+        if (isLoadingRoute) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
         }
 
         Column(
@@ -316,8 +319,8 @@ fun MapScreen(
             AddLandmarkSheet(
                 latitude = longPressLat,
                 longitude = longPressLng,
-                onSave = { name, desc ->
-                    vm.addLandmark(name, desc, longPressLat, longPressLng)
+                onSave = { name, desc, iconType, color ->
+                    vm.addLandmark(name, desc, longPressLat, longPressLng, iconType, color)
                     showAddLandmarkSheet = false
                     searchPinPoint = null
                     fromSearch = false
@@ -337,9 +340,9 @@ fun MapScreen(
             LandmarkBottomSheet(
                 landmark = lm,
                 onEdit = {
-                    editLandmarkName = lm.name
-                    editLandmarkDesc = lm.description
-                    showEditLandmarkDialog = true
+                    editingLandmark = lm
+                    vm.selectLandmark(null)
+                    showEditLandmarkSheet = true
                 },
                 onNavigate = {
                     val label = Uri.encode(lm.name)
@@ -387,47 +390,29 @@ fun MapScreen(
         }
     }
 
-    // ── Landmark edit dialog ─────────────────────────────────────────────────
-    if (showEditLandmarkDialog && selectedLandmark != null) {
-        AlertDialog(
-            onDismissRequest = { showEditLandmarkDialog = false },
-            title = { Text("Edit Landmark") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = editLandmarkName,
-                        onValueChange = { editLandmarkName = it },
-                        label = { Text("Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editLandmarkDesc,
-                        onValueChange = { editLandmarkDesc = it },
-                        label = { Text("Description (optional)") },
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (editLandmarkName.isNotBlank()) {
-                            vm.updateLandmark(selectedLandmark!!.copy(
-                                name = editLandmarkName.trim(),
-                                description = editLandmarkDesc.trim()
-                            ))
-                        }
-                        showEditLandmarkDialog = false
-                    },
-                    enabled = editLandmarkName.isNotBlank()
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditLandmarkDialog = false }) { Text("Cancel") }
-            }
-        )
+    // ── Landmark edit sheet ──────────────────────────────────────────────────
+    if (showEditLandmarkSheet && editingLandmark != null) {
+        val lm = editingLandmark!!
+        ModalBottomSheet(
+            onDismissRequest = { showEditLandmarkSheet = false; editingLandmark = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            AddLandmarkSheet(
+                latitude = lm.latitude,
+                longitude = lm.longitude,
+                initialName = lm.name,
+                initialDescription = lm.description,
+                initialIconType = lm.iconType,
+                initialColor = lm.color,
+                saveButtonLabel = "Update",
+                onSave = { name, desc, iconType, color ->
+                    vm.updateLandmark(lm.copy(name = name, description = desc, iconType = iconType, color = color))
+                    showEditLandmarkSheet = false
+                    editingLandmark = null
+                },
+                onDismiss = { showEditLandmarkSheet = false; editingLandmark = null }
+            )
+        }
     }
 
     // ── Tap stand detail sheet ───────────────────────────────────────────────
@@ -513,8 +498,9 @@ private fun LandmarkBottomSheet(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Header
+        val iconDef = LandmarkIcons.fromKey(landmark.iconType)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFF9800), modifier = Modifier.size(32.dp))
+            Icon(iconDef.icon, contentDescription = null, tint = Color(landmark.color), modifier = Modifier.size(32.dp))
             Column(Modifier.weight(1f)) {
                 Text(landmark.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text("Pinned Landmark", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

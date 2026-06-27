@@ -105,9 +105,18 @@ class MapViewModel(
 
     // ── Landmark operations ──────────────────────────────────────────────────
 
-    fun addLandmark(name: String, description: String, lat: Double, lng: Double) {
+    fun addLandmark(
+        name: String, description: String, lat: Double, lng: Double,
+        iconType: String = "landmark", color: Int = 0xFFFF9800.toInt()
+    ) {
         viewModelScope.launch {
-            landmarkRepository.insert(LandmarkEntity(name = name, description = description, latitude = lat, longitude = lng))
+            landmarkRepository.insert(
+                LandmarkEntity(
+                    name = name, description = description,
+                    latitude = lat, longitude = lng,
+                    iconType = iconType, color = color
+                )
+            )
         }
     }
 
