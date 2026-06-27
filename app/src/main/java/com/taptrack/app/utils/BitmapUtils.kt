@@ -117,6 +117,53 @@ fun createBoundaryLabelBitmap(context: Context, text: String, borderColor: Int):
     return BitmapDrawable(context.resources, bmp)
 }
 
+/** Red crosshair pin dropped on map when a search result is selected. */
+fun createSearchPinBitmap(context: Context): BitmapDrawable {
+    val dp = context.resources.displayMetrics.density
+    val size = (48 * dp).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+
+    val cx = size / 2f
+    val badgeR = size * 0.30f
+    val badgeCy = badgeR + size * 0.04f
+    val neckY = badgeCy + badgeR * 0.60f
+    val tipY = size * 0.97f
+    val pinColor = Color.parseColor("#E53935")
+
+    val colorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pinColor; style = Paint.Style.FILL }
+    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(55, 0, 0, 0); style = Paint.Style.FILL }
+
+    // shadow
+    canvas.drawCircle(cx + dp, badgeCy + dp, badgeR, shadowPaint)
+    canvas.drawPath(Path().apply {
+        moveTo(cx - badgeR * 0.42f + dp, neckY + dp); lineTo(cx + badgeR * 0.42f + dp, neckY + dp)
+        lineTo(cx + dp, tipY + dp); close()
+    }, shadowPaint)
+
+    // badge + pointer
+    canvas.drawCircle(cx, badgeCy, badgeR, colorPaint)
+    canvas.drawPath(Path().apply {
+        moveTo(cx - badgeR * 0.42f, neckY); lineTo(cx + badgeR * 0.42f, neckY); lineTo(cx, tipY); close()
+    }, colorPaint)
+
+    // white border ring
+    canvas.drawCircle(cx, badgeCy, badgeR, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = dp * 1.6f
+    })
+
+    // crosshair + circle inside badge
+    val arm = badgeR * 0.44f
+    val crossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = dp * 1.6f; strokeCap = Paint.Cap.ROUND
+    }
+    canvas.drawLine(cx - arm, badgeCy, cx + arm, badgeCy, crossPaint)
+    canvas.drawLine(cx, badgeCy - arm, cx, badgeCy + arm, crossPaint)
+    canvas.drawCircle(cx, badgeCy, arm * 0.38f, crossPaint)
+
+    return BitmapDrawable(context.resources, bmp)
+}
+
 fun createTapMarkerBitmap(context: Context, color: Int = Color.parseColor("#0277BD")): BitmapDrawable {
     val dp = context.resources.displayMetrics.density
     val size = (56 * dp).toInt()

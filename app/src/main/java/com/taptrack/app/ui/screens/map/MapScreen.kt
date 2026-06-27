@@ -89,10 +89,13 @@ fun MapScreen(
     var isLoadingRoute      by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Long-press state
-    var longPressLat     by remember { mutableDoubleStateOf(0.0) }
-    var longPressLng     by remember { mutableDoubleStateOf(0.0) }
+    // Long-press / search-pin state
+    var longPressLat      by remember { mutableDoubleStateOf(0.0) }
+    var longPressLng      by remember { mutableDoubleStateOf(0.0) }
     var longPressNearUser by remember { mutableStateOf(false) }
+    var fromSearch        by remember { mutableStateOf(false) }
+    var searchPinPoint    by remember { mutableStateOf<GeoPoint?>(null) }
+    var searchPinLabel    by remember { mutableStateOf("") }
     var showPinChoiceSheet   by remember { mutableStateOf(false) }
     var showAddLandmarkSheet by remember { mutableStateOf(false) }
 
@@ -131,10 +134,20 @@ fun MapScreen(
             routePoints = routeResult?.points,
             boundaryOverlays = boundaryOverlays,
             landmarks = landmarks,
+            searchPin = searchPinPoint,
             onMarkerClick = { item -> vm.select(item) },
             onLandmarkClick = { lm -> vm.selectLandmark(lm) },
+            onSearchPinClick = {
+                longPressLat = searchPinPoint!!.latitude
+                longPressLng = searchPinPoint!!.longitude
+                fromSearch = true
+                showPinChoiceSheet = true
+            },
             onMapViewReady = { mapViewRef = it },
             onLongPress = { lat, lng, nearUser ->
+                // Long press replaces any existing search pin
+                searchPinPoint = null
+                fromSearch = false
                 longPressLat = lat; longPressLng = lng; longPressNearUser = nearUser
                 showPinChoiceSheet = true
             }
@@ -144,7 +157,19 @@ fun MapScreen(
             modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            MapSearchBar(onResultSelected = { point, _ -> searchTarget = point }, modifier = Modifier.fillMaxWidth())
+            MapSearchBar(
+                onResultSelected = { point, label ->
+                    searchTarget = point
+                    searchPinPoint = point
+                    searchPinLabel = label
+                    longPressLat = point.latitude
+                    longPressLng = point.longitude
+                    longPressNearUser = false
+                    fromSearch = true
+                    showPinChoiceSheet = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
 
             if (!locationPermissions.allPermissionsGranted) {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(8.dp)) {
@@ -205,7 +230,7 @@ fun MapScreen(
             text = { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) })
     }
 
-    // ── Long-press pin choice sheet ──────────────────────────────────────────
+    // ── Pin choice sheet (long-press or search result) ───────────────────────
     if (showPinChoiceSheet) {
         ModalBottomSheet(
             onDismissRequest = { showPinChoiceSheet = false },
@@ -216,15 +241,49 @@ fun MapScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        if (fromSearch) Icons.Default.Search else Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = if (fromSearch) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
                     Column {
-                        Text("Pinned Location", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Text(formatCoordinates(longPressLat, longPressLng), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            if (fromSearch && searchPinLabel.isNotBlank()) searchPinLabel else "Selected Location",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2
+                        )
+                        Text(
+                            "%.6f, %.6f".format(longPressLat, longPressLng),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-                if (longPressNearUser) {
+
+                // Copy coordinates button (always visible)
+                OutlinedButton(
+                    onClick = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("coordinates", "$longPressLat, $longPressLng"))
+                        Toast.makeText(context, "Coordinates copied", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy Coordinates")
+                }
+
+                // Add Tap Stand: when near GPS OR from search (deliberate coordinate lookup)
+                if (longPressNearUser || fromSearch) {
                     OutlinedButton(
-                        onClick = { showPinChoiceSheet = false; onNavigateToAdd(longPressLat, longPressLng) },
+                        onClick = {
+                            showPinChoiceSheet = false
+                            searchPinPoint = null
+                            fromSearch = false
+                            onNavigateToAdd(longPressLat, longPressLng)
+                        },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.WaterDrop, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -232,8 +291,12 @@ fun MapScreen(
                         Text("Add Tap Stand here")
                     }
                 }
+
                 Button(
-                    onClick = { showPinChoiceSheet = false; showAddLandmarkSheet = true },
+                    onClick = {
+                        showPinChoiceSheet = false
+                        showAddLandmarkSheet = true
+                    },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -256,6 +319,8 @@ fun MapScreen(
                 onSave = { name, desc ->
                     vm.addLandmark(name, desc, longPressLat, longPressLng)
                     showAddLandmarkSheet = false
+                    searchPinPoint = null
+                    fromSearch = false
                 },
                 onDismiss = { showAddLandmarkSheet = false }
             )

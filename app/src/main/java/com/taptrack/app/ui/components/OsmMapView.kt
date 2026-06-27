@@ -27,6 +27,7 @@ import com.taptrack.app.ui.screens.map.BoundaryOverlay
 import com.taptrack.app.utils.createBoundaryLabelBitmap
 import com.taptrack.app.utils.createLandmarkMarkerBitmap
 import com.taptrack.app.utils.createLocationDotBitmap
+import com.taptrack.app.utils.createSearchPinBitmap
 import com.taptrack.app.utils.createTapMarkerBitmap
 import com.taptrack.app.utils.getLastKnownLocation
 import org.osmdroid.config.Configuration
@@ -60,8 +61,10 @@ fun OsmMapView(
     routePoints: List<GeoPoint>? = null,
     boundaryOverlays: List<BoundaryOverlay> = emptyList(),
     landmarks: List<LandmarkEntity> = emptyList(),
+    searchPin: org.osmdroid.util.GeoPoint? = null,
     onMarkerClick: (TapStandWithMeters) -> Unit = {},
     onLandmarkClick: (LandmarkEntity) -> Unit = {},
+    onSearchPinClick: (() -> Unit)? = null,
     onMapViewReady: (MapView) -> Unit = {},
     /** Fires on every long press. nearUser=true when pressing within ~80px of GPS dot. */
     onLongPress: ((lat: Double, lng: Double, nearUser: Boolean) -> Unit)? = null
@@ -253,6 +256,26 @@ fun OsmMapView(
 
     LaunchedEffect(searchTarget) {
         searchTarget?.let { mapView.controller.animateTo(it, 17.0, 1000L) }
+    }
+
+    // ── Search pin marker ────────────────────────────────────────────────────
+    val searchPinIcon = remember { createSearchPinBitmap(context) }
+    val searchPinMarkerRef = remember { mutableStateOf<Marker?>(null) }
+    val onSearchPinClickRef = rememberUpdatedState(onSearchPinClick)
+    LaunchedEffect(searchPin) {
+        searchPinMarkerRef.value?.let { mapView.overlays.remove(it) }
+        searchPinMarkerRef.value = null
+        if (searchPin != null) {
+            val marker = Marker(mapView).apply {
+                position = searchPin
+                icon = searchPinIcon
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                setOnMarkerClickListener { _, _ -> onSearchPinClickRef.value?.invoke(); true }
+            }
+            mapView.overlays.add(marker)
+            searchPinMarkerRef.value = marker
+        }
+        mapView.invalidate()
     }
 
     // ── Tap stand markers ────────────────────────────────────────────────────
